@@ -65,7 +65,7 @@ def detect_cusum(data, basesd, dt, threshhold = 10, stepsize = 3, minlength = 10
                     varS = 0
             if maxstates > 0:
                 if nStates > 10:
-                    print 'too sensitive'
+                    print('too sensitive')
                     nStates = 0
                     k = 0
                     stepsize = stepsize*1.1

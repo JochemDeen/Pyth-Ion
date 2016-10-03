@@ -11,8 +11,8 @@ class PoreSizer(QtGui.QWidget):
         QtGui.QWidget.__init__(self,master)
         self.uips = Ui_PoreSizerWidget()
         self.uips.setupUi(self)
-        
-        QtCore.QObject.connect(self.uips.compute_button, QtCore.SIGNAL('clicked()'), self.sizepore)
+        self.uips.compute_button.clicked.connect(self.sizepore)
+        #QtCore.QObject.connect(self.uips.compute_button, QtCore.SIGNAL('clicked()'), self.sizepore)
         
         
     def sizepore(self):

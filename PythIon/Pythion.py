@@ -6,9 +6,9 @@ from scipy import ndimage
 import os
 from scipy import signal
 from scipy import io as spio
-#from PlotGUI import *
+from PlotGUI import *
 #from plotgui4k import *
-from plotguiretina import *
+#from plotguiretina import *
 import pyqtgraph as pg
 import pandas.io.parsers
 import pandas as pd
@@ -16,8 +16,7 @@ from abfheader import *
 from CUSUMV2 import detect_cusum
 from PoreSizer import *
 from batchinfo import *
-
-
+import UsefulFunctions as uf
 
 class GUIForm(QtGui.QMainWindow):
 
@@ -29,28 +28,27 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.setupUi(self)
 
         ##########Linking buttons to main functions############
-        QtCore.QObject.connect(self.ui.loadbutton, QtCore.SIGNAL('clicked()'), self.getfile)
-        QtCore.QObject.connect(self.ui.analyzebutton, QtCore.SIGNAL('clicked()'), self.analyze)
-        QtCore.QObject.connect(self.ui.cutbutton, QtCore.SIGNAL('clicked()'), self.cut)
-        QtCore.QObject.connect(self.ui.baselinebutton, QtCore.SIGNAL('clicked()'), self.baselinecalc)
-        QtCore.QObject.connect(self.ui.clearscatterbutton, QtCore.SIGNAL('clicked()'), self.clearscatter)
-        QtCore.QObject.connect(self.ui.deleteeventbutton, QtCore.SIGNAL('clicked()'), self.deleteevent)
-        QtCore.QObject.connect(self.ui.invertbutton, QtCore.SIGNAL('clicked()'), self.invertdata)
-        QtCore.QObject.connect(self.ui.concatenatebutton, QtCore.SIGNAL('clicked()'), self.concatenatetext)
-        QtCore.QObject.connect(self.ui.nextfilebutton, QtCore.SIGNAL('clicked()'), self.nextfile)
-        QtCore.QObject.connect(self.ui.previousfilebutton, QtCore.SIGNAL('clicked()'), self.previousfile)
-        QtCore.QObject.connect(self.ui.savetargetbutton, QtCore.SIGNAL('clicked()'), self.savetarget)
-        QtCore.QObject.connect(self.ui.showcatbutton, QtCore.SIGNAL('clicked()'), self.showcattrace)
-        QtCore.QObject.connect(self.ui.savecatbutton, QtCore.SIGNAL('clicked()'), self.savecattrace)
-        QtCore.QObject.connect(self.ui.gobutton, QtCore.SIGNAL('clicked()'), self.inspectevent)
-        QtCore.QObject.connect(self.ui.previousbutton, QtCore.SIGNAL('clicked()'), self.previousevent)
-        QtCore.QObject.connect(self.ui.nextbutton, QtCore.SIGNAL('clicked()'), self.nextevent)
-        QtCore.QObject.connect(self.ui.savefitsbutton, QtCore.SIGNAL('clicked()'), self.saveeventfits)
-        QtCore.QObject.connect(self.ui.fitbutton, QtCore.SIGNAL('clicked()'), self.CUSUM)
-        QtCore.QObject.connect(self.ui.Poresizeraction, QtCore.SIGNAL('triggered()'), self.sizethepore)
-        QtCore.QObject.connect(self.ui.actionBatch_Process, QtCore.SIGNAL('triggered()'), self.batchinfodialog)
-
-
+        self.ui.loadbutton.clicked.connect(self.getfile)
+        self.ui.analyzebutton.clicked.connect(self.analyze)
+        self.ui.cutbutton.clicked.connect(self.cut)
+        self.ui.baselinebutton.clicked.connect(self.baselinecalc)
+        self.ui.clearscatterbutton.clicked.connect(self.clearscatter)
+        self.ui.deleteeventbutton.clicked.connect(self.deleteevent)
+        self.ui.invertbutton.clicked.connect(self.invertdata)
+        #self.ui.invertbutton.clicked.connect(self.makeIV)
+        self.ui.concatenatebutton.clicked.connect(self.concatenatetext)
+        self.ui.nextfilebutton.clicked.connect(self.nextfile)
+        self.ui.previousfilebutton.clicked.connect(self.previousfile)
+        self.ui.savetargetbutton.clicked.connect(self.savetarget)
+        self.ui.showcatbutton.clicked.connect(self.showcattrace)
+        self.ui.savecatbutton.clicked.connect(self.savecattrace)
+        self.ui.gobutton.clicked.connect(self.inspectevent)
+        self.ui.previousbutton.clicked.connect(self.previousevent)
+        self.ui.nextbutton.clicked.connect(self.nextevent)
+        self.ui.savefitsbutton.clicked.connect(self.saveeventfits)
+        self.ui.fitbutton.clicked.connect(self.CUSUM)
+        self.ui.Poresizeraction.triggered.connect(self.sizethepore)
+#        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
 
         ###### Setting up plotting elements and their respective options######
         self.ui.signalplot.setBackground('w')
@@ -109,8 +107,8 @@ class GUIForm(QtGui.QMainWindow):
         self.p3.hideAxis('left')
 
         dir_path = os.path.dirname(os.path.realpath(__file__))
-        self.logo=ndimage.imread(dir_path + os.sep + "pythionlogo.png")
-        self.logo=np.rot90(self.logo,-1)
+        self.logo = ndimage.imread(dir_path + os.sep + "pythionlogo.png")
+        self.logo = np.rot90(self.logo,-1)
         self.logo = pg.ImageItem(self.logo)
         self.p3.addItem(self.logo)
         self.p3.setAspectLocked(True)
@@ -158,12 +156,22 @@ class GUIForm(QtGui.QMainWindow):
 
         self.threshold=np.float64(self.ui.thresholdentry.text())*10**-9
         self.ui.filelabel.setText(self.datafilename)
-        print(self.datafilename)
         self.LPfiltercutoff = np.float64(self.ui.LPentry.text())*1000
         self.outputsamplerate = np.float64(self.ui.outputsamplerateentry.text())*1000 #use integer multiples of 4166.67 ie 2083.33 or 1041.67
 
+        if str(os.path.splitext(self.datafilename)[1])=='.dat':
+            print('Loading Axopatch Data')
+            self.out=uf.ImportAxopatchData(self.datafilename)
+            self.data = self.out['i1']
+            self.vdata = self.out['v1']
+            self.outputsamplerate=self.out['samplerate']
+            self.ui.outputsamplerateentry.setText(str(self.out['samplerate']))
+            if self.out['graphene']:
+                self.dataAxo2 = self.out['i2']
+                self.vdataAxo2 = self.out['v2']
 
-        if str(os.path.splitext(self.datafilename)[1])=='.log':
+        if str(os.path.splitext(self.datafilename)[1]) == '.log':
+            print('Loading Chimera File')
             self.CHIMERAfile = np.dtype('<u2')
             self.data=np.fromfile(self.datafilename,self.CHIMERAfile)
 
@@ -208,8 +216,8 @@ class GUIForm(QtGui.QMainWindow):
                 self.mat = spio.loadmat(self.matfilename + '_inf')  
                 samplerate = np.float64(self.mat['samplerate'])
                 lowpass = np.float64(self.mat['filterfreq'])
-                print samplerate
-                print lowpass
+                print(samplerate)
+                print(lowpass)
             except TypeError:
                 pass
             
@@ -309,7 +317,7 @@ class GUIForm(QtGui.QMainWindow):
             self.p1.autoRange()
     
             self.p3.clear()
-            aphy, aphx = np.histogram(self.data, bins = len(self.data)/1000, range = [np.min(self.data),np.max(self.data)])
+            aphy, aphx = np.histogram(self.data, bins=np.round(len(self.data)/1000))
             aphx = aphx
 #            aphhist = pg.BarGraphItem(height = aphy, x0 = aphx[:-1], x1 = aphx[1:], brush = 'b', pen = None)
             aphhist = pg.PlotCurveItem(aphx, aphy, stepMode=True, fillLevel=0, brush='b')
@@ -329,13 +337,15 @@ class GUIForm(QtGui.QMainWindow):
 
         try:
             ######## attempt to open dialog from most recent directory########
-            self.datafilename = str(QtGui.QFileDialog.getOpenFileName(self,'Open file',self.direc,("*.log;*.opt;*.npy;*.txt;*.abf")))
+            datafilenametemp = QtGui.QFileDialog.getOpenFileName(parent=self, caption='Open file', directory=str(self.direc), filter="Amplifier Files(*.log *.opt *.npy *.txt *.abf *.dat)")
+            self.datafilename=datafilenametemp[0]
             self.direc=os.path.dirname(self.datafilename)
             self.Load()
         except TypeError:
             ####### if no recent directory exists open from working directory##
             self.direc==[]
-            self.datafilename = str(QtGui.QFileDialog.getOpenFileName(self, 'Open file',os.getcwd(),("*.log;*.opt;*.npy;*.txt;*.abf"))  )
+            datafilenametemp = QtGui.QFileDialog.getOpenFileName(parent=self, caption='Open file', directory=os.getcwd(), filter="Amplifier Files(*.log *.opt *.npy *.txt *.abf *.dat)")
+            self.datafilename=datafilenametemp[0]
             self.direc=os.path.dirname(self.datafilename)
             self.Load()
         except IOError:
@@ -477,7 +487,7 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.scatterplot.update()
         self.w1.setRange(yRange=[0,1])
 
-        colors = set(self.sdf.color)
+        colors = self.sdf.color
         for i, x in enumerate(colors):
             fracy, fracx = np.histogram(self.sdf.frac[self.sdf.color == x], bins=np.linspace(0, 1, int(self.ui.fracbins.text())))
             deliy, delix = np.histogram(self.sdf.deli[self.sdf.color == x], bins=np.linspace(float(self.ui.delirange0.text())*10**-9, float(self.ui.delirange1.text())*10**-9, int(self.ui.delibins.text())))
@@ -746,7 +756,7 @@ class GUIForm(QtGui.QMainWindow):
         self.w3.clear()
         self.w4.clear()
         self.w5.clear()
-        colors = set(self.sdf.color)
+        colors = self.sdf.color
         for i, x in enumerate(colors):
             fracy, fracx = np.histogram(self.sdf.frac[self.sdf.color == x], bins=np.linspace(0, 1, int(self.ui.fracbins.text())))
             deliy, delix = np.histogram(self.sdf.deli[self.sdf.color == x], bins=np.linspace(float(self.ui.delirange0.text())*10**-9, float(self.ui.delirange1.text())*10**-9, int(self.ui.delibins.text())))
@@ -1132,6 +1142,25 @@ class GUIForm(QtGui.QMainWindow):
     def sizethepore(self):
         self.ps = PoreSizer()
         self.ps.show()
+
+    def makeIV(self):
+        AllFigures = {}
+        RawFigures = uf.PlotData(self.out)
+        AllFigures['Channel1Raw'] = RawFigures['Fig1']
+        AllFigures['Channel2Raw'] = RawFigures['Fig2']
+        # Cut the data into pieces
+        (AllData, AllFigures['ExtractedSegments']) = uf.CutDataIntoVoltageSegments(self.out, delay=5, plotSegments=1,GrapheneChannel=0)
+        #
+        # # Construct IV
+        if AllData is not 0:
+            # Make IV
+            (self.IVData, AllFigures['IVOnly']) = uf.MakeIV(AllData)
+            # Fit IV
+            (FitValues, AllFigures['IVWithFit']) = uf.FitIV(self.IVData)
+
+            # Save the Figures
+        uf.SaveFigureList(self.out['filename'], AllFigures)
+
 
 def start():
     app = QtGui.QApplication(sys.argv)

@@ -6,7 +6,7 @@
 #
 # WARNING! All changes made in this file will be lost!
 
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui
 
 try:
     _fromUtf8 = QtCore.QString.fromUtf8
@@ -230,7 +230,7 @@ class Ui_PythIon(object):
         self.groupBox1.setObjectName(_fromUtf8("groupBox1"))
         self.horizontalLayout = QtGui.QHBoxLayout(self.groupBox1)
         self.horizontalLayout.setSizeConstraint(QtGui.QLayout.SetNoConstraint)
-        self.horizontalLayout.setMargin(5)
+#        self.horizontalLayout.setMargin(5)
         self.horizontalLayout.setObjectName(_fromUtf8("horizontalLayout"))
         self.verticalLayout_5 = QtGui.QVBoxLayout()
         self.verticalLayout_5.setObjectName(_fromUtf8("verticalLayout_5"))
@@ -582,7 +582,7 @@ class Ui_PythIon(object):
         self.verticalGroupBox_6.setSizePolicy(sizePolicy)
         self.verticalGroupBox_6.setObjectName(_fromUtf8("verticalGroupBox_6"))
         self.verticalLayout_7 = QtGui.QVBoxLayout(self.verticalGroupBox_6)
-        self.verticalLayout_7.setMargin(5)
+#        self.verticalLayout_7.setMargin(5)
         self.verticalLayout_7.setSpacing(5)
         self.verticalLayout_7.setObjectName(_fromUtf8("verticalLayout_7"))
         self.deleteeventbutton = QtGui.QPushButton(self.verticalGroupBox_6)

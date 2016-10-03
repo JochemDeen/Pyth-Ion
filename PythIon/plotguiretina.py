@@ -6,8 +6,7 @@
 #
 # WARNING! All changes made in this file will be lost!
 
-from PyQt4 import QtCore, QtGui
-
+from PyQt5 import QtCore, QtGui
 try:
     _fromUtf8 = QtCore.QString.fromUtf8
 except AttributeError:
@@ -24,9 +23,11 @@ except AttributeError:
 
 class Ui_PythIon(object):
     def setupUi(self, PythIon):
+        print("Setting Up UI")
         PythIon.setObjectName(_fromUtf8("PythIon"))
-        PythIon.resize(1952, 1321)
-        sizePolicy = QtGui.QSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding)
+        #PythIon.resize(1952, 1321)
+        PythIon.resize(1200, 1000)
+        sizePolicy = QtGui.QSizePolicy(QtGui.QSizePolicy.Fixed, QtGui.QSizePolicy.Fixed)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(PythIon.sizePolicy().hasHeightForWidth())
@@ -237,7 +238,7 @@ class Ui_PythIon(object):
         self.groupBox1.setObjectName(_fromUtf8("groupBox1"))
         self.horizontalLayout = QtGui.QHBoxLayout(self.groupBox1)
         self.horizontalLayout.setSizeConstraint(QtGui.QLayout.SetNoConstraint)
-        self.horizontalLayout.setMargin(5)
+#        self.horizontalLayout.setMargin(5)
         self.horizontalLayout.setObjectName(_fromUtf8("horizontalLayout"))
         self.verticalLayout_5 = QtGui.QVBoxLayout()
         self.verticalLayout_5.setObjectName(_fromUtf8("verticalLayout_5"))
