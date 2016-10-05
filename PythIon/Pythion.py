@@ -6,10 +6,11 @@ from scipy import ndimage
 import os
 from scipy import signal
 from scipy import io as spio
-from PlotGUI import *
+from UserInterface import *
 #from plotgui4k import *
 #from plotguiretina import *
 import pyqtgraph as pg
+from pyqtgraph.dockarea import *
 import pandas.io.parsers
 import pandas as pd
 from abfheader import *
@@ -48,6 +49,9 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.savefitsbutton.clicked.connect(self.saveeventfits)
         self.ui.fitbutton.clicked.connect(self.CUSUM)
         self.ui.Poresizeraction.triggered.connect(self.sizethepore)
+        self.ui.ndChannel.clicked.connect(self.Channel2Button)
+        self.ui.makeIVButton.clicked.connect(self.makeIV)
+
 #        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
 
         ###### Setting up plotting elements and their respective options######
@@ -58,14 +62,23 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.delihistplot.setBackground('w')
         self.ui.dwellhistplot.setBackground('w')
         self.ui.dthistplot.setBackground('w')
+        self.ui.voltageplotwin.setBackground('w')
 #        self.ui.PSDplot.setBackground('w')
+        self.ui.AxopatchGroup.setVisible(0)
 
+        self.ui.label_2.setText('Output Samplerate (kHz)' + str(pg.siScale(np.float(self.ui.outputsamplerateentry.text()))[1]))
         self.p1 = self.ui.signalplot.addPlot()
         self.p1.setLabel('bottom', text='Time', units='s')
         self.p1.setLabel('left', text='Current', units='A')
         self.p1.enableAutoRange(axis = 'x')
         self.p1.setDownsampling(ds=True, auto=True, mode='peak')
 
+        self.voltagepl = self.ui.voltageplotwin.addPlot()
+        self.voltagepl.setLabel('bottom', text='Time', units='s')
+        self.voltagepl.setLabel('left', text='Voltage', units='V')
+        self.voltagepl.enableAutoRange(axis = 'x')
+        self.voltagepl.setDownsampling(ds=True, auto=True, mode='peak')
+        self.voltagepl.setXLink(self.p1)
 
         self.w1 = self.ui.scatterplot.addPlot()
         self.p2 = pg.ScatterPlotItem()
@@ -115,6 +128,7 @@ class GUIForm(QtGui.QMainWindow):
 
 
         ####### Initializing various variables used for analysis##############
+        self.Channel2=0
         self.direc=[]
         self.lr=[]
         self.lastevent=[]
@@ -167,8 +181,9 @@ class GUIForm(QtGui.QMainWindow):
             self.outputsamplerate=self.out['samplerate']
             self.ui.outputsamplerateentry.setText(str(self.out['samplerate']))
             if self.out['graphene']:
-                self.dataAxo2 = self.out['i2']
-                self.vdataAxo2 = self.out['v2']
+                self.ui.AxopatchGroup.setVisible(1)
+                self.p1.setLabel('left', text='Channel 1 Current', units='A')
+                self.voltagepl.setLabel('left', text='Channel 1 Voltage', units='V')
 
         if str(os.path.splitext(self.datafilename)[1]) == '.log':
             print('Loading Chimera File')
@@ -305,24 +320,7 @@ class GUIForm(QtGui.QMainWindow):
 
 
         if loadandplot == True:
-            self.p1.clear()
-            self.p1.setDownsampling(ds = True)
-            #skips plotting first and last two points, there was a weird spike issue
-            self.p1.plot(self.t[2:][:-2],self.data[2:][:-2],pen='b')
-    
-            if str(os.path.splitext(self.datafilename)[1]) != '.abf':
-                self.p1.addLine(y=self.baseline,pen='g')
-                self.p1.addLine(y=self.threshold,pen='r')
-    
-            self.p1.autoRange()
-    
-            self.p3.clear()
-            aphy, aphx = np.histogram(self.data, bins=np.round(len(self.data)/1000))
-            aphx = aphx
-#            aphhist = pg.BarGraphItem(height = aphy, x0 = aphx[:-1], x1 = aphx[1:], brush = 'b', pen = None)
-            aphhist = pg.PlotCurveItem(aphx, aphy, stepMode=True, fillLevel=0, brush='b')
-            self.p3.addItem(aphhist)
-#            self.p3.setXRange(np.min(self.data), np.max(self.data))
+            self.Plot()
             
     
     #        if self.v != []:
@@ -332,6 +330,33 @@ class GUIForm(QtGui.QMainWindow):
     #        f, Pxx_den = signal.welch(self.data*10**12, self.outputsamplerate, nperseg = self.outputsamplerate)
     #        self.w6.plot(x = f[1:], y = Pxx_den[1:], pen = 'b')
     #        self.w6.setXRange(0,np.log10(self.outputsamplerate))
+    def Plot(self):
+        self.p1.clear()
+        self.p1.setDownsampling(ds=True)
+        # skips plotting first and last two points, there was a weird spike issue
+        self.p1.plot(self.t[2:][:-2], self.data[2:][:-2], pen='b')
+
+        if str(os.path.splitext(self.datafilename)[1]) != '.abf':
+            self.p1.addLine(y=self.baseline, pen='g')
+            self.p1.addLine(y=self.threshold, pen='r')
+
+        self.p1.autoRange()
+
+        self.p3.clear()
+        aphy, aphx = np.histogram(self.data, bins=np.round(len(self.data) / 1000))
+        aphx = aphx
+        #            aphhist = pg.BarGraphItem(height = aphy, x0 = aphx[:-1], x1 = aphx[1:], brush = 'b', pen = None)
+        aphhist = pg.PlotCurveItem(aphx, aphy, stepMode=True, fillLevel=0, brush='b')
+        self.p3.addItem(aphhist)
+
+        self.ui.label_2.setText('Output Samplerate ' + str(pg.siScale(np.float(self.outputsamplerate))[1]))
+        try:
+            if self.out['type']=='Axopatch':
+                print('Replot')
+                self.voltagepl.clear()
+                self.voltagepl.plot(self.t[2:][:-2], self.vdata[2:][:-2], pen='b')
+        except:
+            return
 
     def getfile(self):
 
@@ -865,7 +890,19 @@ class GUIForm(QtGui.QMainWindow):
                 self.datafilename=(filebase+nextindex+'.abf')
                 self.Load()
 
-
+    def Channel2Button(self):
+        if not self.ui.ndChannel.checkState():
+            self.data = self.out['i1']
+            self.vdata = self.out['v1']
+            self.p1.setLabel('left', text='Channel 1 Current', units='A')
+            self.voltagepl.setLabel('left', text='Channel 1 Voltage', units='V')
+            self.Plot()
+        else:
+            self.data = self.out['i2']
+            self.vdata = self.out['v2']
+            self.p1.setLabel('left', text='Channel 2 Current', units='A')
+            self.voltagepl.setLabel('left', text='Channel 2 Voltage', units='V')
+            self.Plot()
 
     def previousfile(self):
         if str(os.path.splitext(self.datafilename)[1])=='.log':
@@ -1144,23 +1181,33 @@ class GUIForm(QtGui.QMainWindow):
         self.ps.show()
 
     def makeIV(self):
-        AllFigures = {}
-        RawFigures = uf.PlotData(self.out)
-        AllFigures['Channel1Raw'] = RawFigures['Fig1']
-        AllFigures['Channel2Raw'] = RawFigures['Fig2']
-        # Cut the data into pieces
-        (AllData, AllFigures['ExtractedSegments']) = uf.CutDataIntoVoltageSegments(self.out, delay=5, plotSegments=1,GrapheneChannel=0)
-        #
-        # # Construct IV
+        output = self.out
+
+        ## first dock gets save/restore buttons
+        w1 = pg.LayoutWidget()
+        label = QtGui.QLabel("This interface makes IVs and calculates pore sizes!")
+        saveBtn = QtGui.QPushButton('Save dock state')
+        restoreBtn = QtGui.QPushButton('Restore dock state')
+        restoreBtn.setEnabled(False)
+        w1.addWidget(label, row=0, col=0)
+        w1.addWidget(saveBtn, row=1, col=0)
+        w1.addWidget(restoreBtn, row=2, col=0)
+
+        xlab = 'i2'
+        ylab = 'v1'
+        (AllData, a) = uf.CutDataIntoVoltageSegments(output, delay=1, plotSegments=1, x=xlab,
+                                                                                y=ylab)
         if AllData is not 0:
             # Make IV
-            (self.IVData, AllFigures['IVOnly']) = uf.MakeIV(AllData)
+            (IVData, b) = uf.MakeIV(AllData, plot=1)
             # Fit IV
-            (FitValues, AllFigures['IVWithFit']) = uf.FitIV(self.IVData)
+            (FitValues, c) = uf.FitIV(IVData, x=xlab, y=ylab)
 
-            # Save the Figures
-        uf.SaveFigureList(self.out['filename'], AllFigures)
+        win2.setCentralWidget(c)
 
+        print(
+            pg.siFormat(1 / FitValues['Slope'], precision=3, suffix='Ohm', space=True, error=None, minVal=1e-25,
+                               allowUnicode=True))
 
 def start():
     app = QtGui.QApplication(sys.argv)

@@ -3,11 +3,10 @@ import scipy
 import scipy.signal as sig
 import os
 from scipy import io
-from PyQt5 import QtGui, QtWidgets
+from PyQt5 import QtGui
 import matplotlib.pyplot as plt
 from numpy import linalg as lin
 import pyqtgraph as pg
-
 
 def Reshape1DTo2D(inputarray, buffersize):
     npieces= np.uint16(len(inputarray)/buffersize)
@@ -88,7 +87,6 @@ def ImportChimeraData(datafilename):
 def OpenFile(filename=''):
     if filename == '':
         datafilename = QtGui.QFileDialog.getOpenFileName()
-        datafilename=datafilename[0]
         print(datafilename)
     else:
         datafilename=filename
@@ -137,37 +135,32 @@ def PlotData(output):
     if output['type'] == 'Axopatch':
         time=np.float32(np.arange(0, len(output['i1']))/output['samplerate'])
         #plot channel 1
-        ch1_current = pg.PlotWidget(title="Current vs time Channel 1")
-        ch1_current.plot(time, output['i1'])
-        ch1_current.setLabel('left', text='Current', units='A')
-        ch1_current.setLabel('bottom', text='Time', units='s')
-
-        ch1_voltage = pg.PlotWidget(title="Voltage vs time Channel 1")
-        ch1_voltage.plot(time, output['v1'])
-        ch1_voltage.setLabel('left', text='Voltage', units='V')
-        ch1_voltage.setLabel('bottom', text='Time', units='s')
-        #ch1_voltage.setYLink(ch1_current)
-        ch1_voltage.setXLink(ch1_current)
+        figure = pg.figure('Axopatch: Channel 1')
+        ax1 = pg.subplot(211)
+        ax1.plot(time, output['i1']*1e9)
+        ax1.ylabel('Current [nA]')
+        ax2 = pg.subplot(212, sharex=ax1)
+        ax2.plot(time, output['v1']*1e3)
+        ax2.xlabel('Time [s]')
+        ax2.ylabel('Voltage [mV]')
+        f = zoom_factory(ax1, 1.5)
+        figure.show()
         if output['graphene']:
-            # plot channel 1
-            ch2_current = pg.PlotWidget(title="Current vs time Channel 2")
-            ch2_current.plot(time, output['i2'])
-            ch2_current.setLabel('left', text='Current', units='A')
-            ch2_current.setLabel('bottom', text='Time', units='s')
-
-            ch2_voltage = pg.PlotWidget(title="Voltage vs time Channel 2")
-            ch2_voltage.plot(time, output['v2'])
-            ch2_voltage.setLabel('left', text='Voltage', units='V')
-            ch2_voltage.setLabel('bottom', text='Time', units='s')
-            #ch2_voltage.setYLink(ch2_current)
-            ch2_voltage.setXLink(ch2_current)
-
-            fig_handles={'Ch1_Voltage': ch1_voltage, 'Ch2_Voltage': ch2_voltage, 'Ch2_Current': ch2_current, 'Ch1_Current': ch1_current}
+            figure2 = plt.figure('Axopatch: Channel 2')
+            ax3 = plt.subplot(211)
+            ax3.plot(time, output['i2'] * 1e9)
+            plt.ylabel('Current [nA]')
+            ax4 = plt.subplot(212, sharex=ax3)
+            ax4.plot(time, output['v2'] * 1e3)
+            plt.xlabel('Time [s]')
+            plt.ylabel('Voltage [mV]')
+            f2 = zoom_factory(ax3, 1.5)
+            figure2.show()
+            fig_handles={'Fig1': figure, 'Fig2': figure2, 'Zoom1': f, 'Zoom2': f2}
             return fig_handles
         else:
-            fig_handles = {'Ch1_Voltage': ch1_voltage, 'Ch1_Current': ch1_current, 'Ch2_Voltage': 0, 'Ch2_Current': 0}
+            fig_handles = {'Fig1': figure, 'Fig2': 0, 'Zoom1': f, 'Zoom2': 0}
             return fig_handles
-
     if output['type'] == 'ChimeraRaw':
         time=np.float32(np.arange(0, len(output['current']))/output['samplerate'])
         figure=plt.figure('Chimera Raw Current @ {} mV'.format(output['voltage']*1e3))
@@ -193,31 +186,21 @@ def PlotData(output):
         fig_handles = {'Fig1': 0, 'Fig2': figure2, 'Zoom1': 0, 'Zoom2': f2}
         return fig_handles
 
-def CutDataIntoVoltageSegments(output, delay=0.7, plotSegments = 1, x='i1', y='v1'):
+def CutDataIntoVoltageSegments(output, delay=0.7, plotSegments = 1, GrapheneChannel = 0):
     if output['type'] == 'ChimeraNotRaw':
         current = output['current']
         voltage = output['voltage']
         samplerate = output['samplerate']
-    elif output['type'] == 'Axopatch' and x == 'i1' and y == 'v1':
+    elif output['type'] == 'Axopatch' and not GrapheneChannel:
         current = output['i1']
         voltage = output['v1']
         print('i1,v1')
         samplerate = output['samplerate']
-    elif output['type'] == 'Axopatch' and output['graphene'] and x == 'i2' and y == 'v2':
+    elif output['type'] == 'Axopatch' and GrapheneChannel and output['graphene']:
         current = output['i2']
         voltage = output['v2']
         samplerate = output['samplerate']
         print('i2,v2')
-    elif output['type'] == 'Axopatch' and output['graphene'] and x == 'i2' and y == 'v1':
-        current = output['i2']
-        voltage = output['v1']
-        samplerate = output['samplerate']
-        print('i2,v1')
-    elif output['type'] == 'Axopatch' and output['graphene'] and x == 'i1' and y == 'v2':
-        current = output['i1']
-        voltage = output['v2']
-        samplerate = output['samplerate']
-        print('i1,v2')
     else:
         print('File doesn''t contain any IV data on the selected channel...')
         return (0, 0)
@@ -244,21 +227,22 @@ def CutDataIntoVoltageSegments(output, delay=0.7, plotSegments = 1, x='i1', y='v
     AllData[str(Values[len(Values) - 1])] = current[
                                             ChangePoints[len(ChangePoints) - 1] + delayinpoints:len(current) - 1]
     if plotSegments:
-
-        extractedSegments = pg.PlotWidget(title="Extracted Parts")
-        extractedSegments.plot(time, current, pen='b')
-        extractedSegments.setLabel('left', text='Current', units='A')
-        extractedSegments.setLabel('bottom', text='Time', units='s')
+        fig = plt.figure('Extracted Segments')
+        plt.hold(True)
+        plt.plot(time, current*1e9, 'b')
         # First
-        extractedSegments.plot(np.arange(0,ChangePoints[0])/samplerate, current[0:ChangePoints[0]], pen='r')
+        plt.plot(np.arange(0,ChangePoints[0])/samplerate, current[0:ChangePoints[0]]*1e9, 'r')
         #Loop
         for i in range(1, len(Values) - 1):
-            extractedSegments.plot(np.arange(ChangePoints[i - 1] + delayinpoints, ChangePoints[i]) / samplerate, current[ChangePoints[i - 1] + delayinpoints:ChangePoints[i]], pen='r')
+            plt.plot(np.arange(ChangePoints[i - 1] + delayinpoints, ChangePoints[i]) / samplerate, current[ChangePoints[i - 1] + delayinpoints:ChangePoints[i]] * 1e9, 'r')
         #Last
-            extractedSegments.plot(np.arange(ChangePoints[len(ChangePoints) - 1] + delayinpoints, len(current) - 1 )/samplerate, current[ChangePoints[len(ChangePoints) - 1] + delayinpoints:len(current) - 1], pen='r')
+        plt.plot(np.arange(ChangePoints[len(ChangePoints) - 1] + delayinpoints, len(current) - 1 )/samplerate, current[ChangePoints[len(ChangePoints) - 1] + delayinpoints:len(current) - 1]*1e9, 'r')
+        plt.xlabel('Time [s]')
+        plt.ylabel('Current [nA]')
+        fig.show()
     else:
-        extractedSegments=0
-    return (AllData, extractedSegments)
+        fig=0
+    return (AllData, fig)
 
 def MakeIV(CutData, plot=0):
     l=len(CutData.keys())
@@ -273,39 +257,34 @@ def MakeIV(CutData, plot=0):
         IVData['STD'][count] = np.std(CutData[i])
         count+=1
     if plot:
-        spacing=np.sort(IVData['Voltage'])
-        iv = pg.PlotWidget(title='Current-Voltage Plot')
-        err = pg.ErrorBarItem(x=IVData['Voltage'], y=IVData['Mean'], top=IVData['STD'], bottom=IVData['STD'], beam=((spacing[1]-spacing[0]))/2)
-        iv.addItem(err)
-        iv.plot(IVData['Voltage'], IVData['Mean'], symbol='o', pen=None)
-        iv.setLabel('left', text='Current', units='A')
-        iv.setLabel('bottom', text='Voltage', units='V')
+        fig = plt.figure('Current-Voltage Plot')
+        plt.errorbar(IVData['Voltage']*1e3, IVData['Mean']*1e9, yerr=IVData['STD'], ls='None', marker='o', ms=5)
+        plt.ylabel('Current [nA]')
+        plt.xlabel('Voltage [mV]')
+        fig.show()
     else:
-        iv=0
-    return (IVData, iv)
+        fig=0
+    return (IVData, fig)
 
-def FitIV(IVData, plot=1, x='i1', y='v1'):
+def FitIV(IVData, plot=1):
     sigma_v=1e-12*np.ones(len(IVData['Voltage']))
     (a, b, sigma_a, sigma_b, b_save) = YorkFit(IVData['Voltage'], IVData['Mean'], sigma_v, IVData['STD'])
     x_fit=np.linspace(min(IVData['Voltage']), max(IVData['Voltage']), 1000)
     y_fit=scipy.polyval([b,a], x_fit)
     if plot:
-        spacing=np.sort(IVData['Voltage'])
-        iv = pg.PlotWidget(title='Current-Voltage Plot', background=None)
-        err = pg.ErrorBarItem(x=IVData['Voltage'], y=IVData['Mean'], top=IVData['STD'],
-                              bottom=IVData['STD'], pen='b', beam=((spacing[1]-spacing[0]))/2)
-        iv.addItem(err)
-        iv.plot(IVData['Voltage'], IVData['Mean'], symbol='o', pen=None)
-        iv.setLabel('left', text=x + ', Current', units='A')
-        iv.setLabel('bottom', text=y + ', Voltage', units='V')
-        iv.plot(x_fit, y_fit, pen='r')
-        textval=pg.siFormat(1/b, precision=5, suffix='Ohm', space=True, error=None, minVal=1e-25, allowUnicode=True)
-        textit=pg.TextItem(text=textval, color=(0, 0, 0))
-        iv.addItem(textit)
+        fig = plt.figure('Current-Voltage Plot with Linear Fit')
+        plt.errorbar(IVData['Voltage']*1e3, IVData['Mean']*1e9, yerr=IVData['STD']*1e9, ls='None', marker='o', ms=5)
+        plt.ylabel('Current [nA]')
+        plt.xlabel('Voltage [mV]')
+        plt.hold(True)
+        plt.plot(x_fit*1e3, y_fit*1e9, 'r')
+        plt.text(s='G={:6.2f}nS'.format(b*1e9), x=min(IVData['Voltage']*1e3), y=max(IVData['Mean']*1e9)/2, bbox=dict(facecolor='red', alpha=0.5), fontsize=14)
+        fig.show()
+
     else:
-        iv=0
+        plot=0
     YorkFitValues={'Yintercept':a, 'Slope':b, 'Sigma_Yintercept':sigma_a, 'Sigma_Slope':sigma_b, 'Parameter':b_save}
-    return (YorkFitValues, iv)
+    return (YorkFitValues, fig)
 
 def YorkFit(X, Y, sigma_X, sigma_Y, r=0):
     N_itermax=10 #maximum number of interations
