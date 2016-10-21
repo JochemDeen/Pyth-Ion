@@ -18,6 +18,7 @@ from CUSUMV2 import detect_cusum
 from PoreSizer import *
 from batchinfo import *
 import UsefulFunctions as uf
+import scipy
 
 class GUIForm(QtGui.QMainWindow):
 
@@ -29,6 +30,8 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.setupUi(self)
 
         ##########Linking buttons to main functions############
+        self.ui.IVxaxis.currentIndexChanged.connect(self.IVAxis)
+        self.ui.IVyaxis.currentIndexChanged.connect(self.IVAxis)
         self.ui.loadbutton.clicked.connect(self.getfile)
         self.ui.analyzebutton.clicked.connect(self.analyze)
         self.ui.cutbutton.clicked.connect(self.cut)
@@ -51,8 +54,9 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.Poresizeraction.triggered.connect(self.sizethepore)
         self.ui.ndChannel.clicked.connect(self.Channel2Button)
         self.ui.makeIVButton.clicked.connect(self.makeIV)
+        self.ui.customconductancecheckBox.clicked.connect(self.customCond)
 
-#        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
+        #        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
 
         ###### Setting up plotting elements and their respective options######
         self.ui.signalplot.setBackground('w')
@@ -63,6 +67,8 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.dwellhistplot.setBackground('w')
         self.ui.dthistplot.setBackground('w')
         self.ui.voltageplotwin.setBackground('w')
+        self.ui.ivplot.setBackground('w')
+        self.ui.cutData.setBackground('w')
 #        self.ui.PSDplot.setBackground('w')
         self.ui.AxopatchGroup.setVisible(0)
 
@@ -79,6 +85,16 @@ class GUIForm(QtGui.QMainWindow):
         self.voltagepl.enableAutoRange(axis = 'x')
         self.voltagepl.setDownsampling(ds=True, auto=True, mode='peak')
         self.voltagepl.setXLink(self.p1)
+
+        self.ivplota = self.ui.ivplot
+        #self.ivplot.setLabel('bottom', text='Current', units='A')
+        #self.ivplot.setLabel('left', text='Voltage', units='V')
+        #self.ivplot.enableAutoRange(axis = 'x')
+
+        self.cutplot = self.ui.cutData
+        #self.cutplot.setLabel('bottom', text='Time', units='s')
+        #self.cutplot.setLabel('left', text='Voltage', units='V')
+        #self.cutplot.enableAutoRange(axis = 'x')
 
         self.w1 = self.ui.scatterplot.addPlot()
         self.p2 = pg.ScatterPlotItem()
@@ -126,8 +142,17 @@ class GUIForm(QtGui.QMainWindow):
         self.p3.addItem(self.logo)
         self.p3.setAspectLocked(True)
 
+        self.ui.conductanceText.setText('Conductance: ')
+        self.ui.resistanceText.setText('Resistance: ')
+        self.ui.poresizeOutput.setText('Pore Size: ')
+        self.ui.customConductanceSpinBox.setVisible(False)
+        self.useCustomConductance = 0
+        self.ui.porelengthValue.setOpts(value=0.7E-9, suffix='m', siPrefix=True, dec=True, step=1e-9, minStep=1e-9)
+        self.ui.concentrationValue.setOpts(value=1, suffix='M', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
 
         ####### Initializing various variables used for analysis##############
+        self.xaxisIV=self.ui.IVxaxis.currentIndex()
+        self.yaxisIV=self.ui.IVyaxis.currentIndex()
         self.Channel2=0
         self.direc=[]
         self.lr=[]
@@ -176,6 +201,7 @@ class GUIForm(QtGui.QMainWindow):
         if str(os.path.splitext(self.datafilename)[1])=='.dat':
             print('Loading Axopatch Data')
             self.out=uf.ImportAxopatchData(self.datafilename)
+            self.matfilename = str(os.path.splitext(self.datafilename)[0])
             self.data = self.out['i1']
             self.vdata = self.out['v1']
             self.outputsamplerate=self.out['samplerate']
@@ -185,43 +211,20 @@ class GUIForm(QtGui.QMainWindow):
                 self.p1.setLabel('left', text='Channel 1 Current', units='A')
                 self.voltagepl.setLabel('left', text='Channel 1 Voltage', units='V')
 
+
         if str(os.path.splitext(self.datafilename)[1]) == '.log':
             print('Loading Chimera File')
-            self.CHIMERAfile = np.dtype('<u2')
-            self.data=np.fromfile(self.datafilename,self.CHIMERAfile)
-
-            self.matfilename=str(os.path.splitext(self.datafilename)[0])
-            self.mat = spio.loadmat(self.matfilename)
-
-
-            samplerate = np.float64(self.mat['ADCSAMPLERATE'])
-            TIAgain = np.int32(self.mat['SETUP_TIAgain'])
-            preADCgain = np.float64(self.mat['SETUP_preADCgain'])
-            currentoffset = np.float64(self.mat['SETUP_pAoffset'])
-            ADCvref = np.float64(self.mat['SETUP_ADCVREF'])
-            ADCbits = np.int32(self.mat['SETUP_ADCBITS'])
-            closedloop_gain = TIAgain*preADCgain;
-
-
-            if samplerate < 4000e3:
-                self.data=self.data[::round(samplerate/self.outputsamplerate)]
-
-
-            bitmask = (2**16 - 1) - (2**(16-ADCbits) - 1)
-            self.data = -ADCvref + (2*ADCvref) * (self.data & bitmask) / 2**16
-            self.data = (self.data/closedloop_gain + currentoffset)
-
-            if os.name =='posix':
-                self.data=self.data[0]
-        
-            ###############################################data has now been loaded
-            ###############################################now filtering data
-
-            Wn = round(self.LPfiltercutoff/(samplerate/2),4)
-            b,a = signal.bessel(4, Wn, btype='low');
-
-            self.data = signal.filtfilt(b,a,self.data)
-            
+            self.out = uf.ImportChimeraData(self.datafilename)
+            self.matfilename = str(os.path.splitext(self.datafilename)[0])
+            if self.out['type'] == 'ChimeraNotRaw':
+                self.data = self.out['current']
+                self.vdata = self.out['voltage']
+            else:
+                Wn = round(self.LPfiltercutoff/(self.out['samplerate']/2), 4)
+                b,a = signal.bessel(4, Wn, btype='low');
+                self.out['lowpassedData'] = signal.filtfilt(b,a,self.out['current'])
+                self.data = self.out['lowpassedData']
+                self.vdata = np.ones(len(self.data)) * self.out['voltage']
 
         if str(os.path.splitext(self.datafilename)[1])=='.opt':
             self.data = np.fromfile(self.datafilename, dtype = np.dtype('>d'))
@@ -253,7 +256,6 @@ class GUIForm(QtGui.QMainWindow):
 #            self.data=np.reshape(np.array(self.data),np.size(self.data))*10**9
             self.data=np.reshape(np.array(self.data),np.size(self.data))
             self.matfilename=str(os.path.splitext(self.datafilename)[0])
-
 
         if str(os.path.splitext(self.datafilename)[1])=='.npy':
             self.data = np.load(self.datafilename)
@@ -311,7 +313,7 @@ class GUIForm(QtGui.QMainWindow):
 
 
         self.t=np.arange(0,len(self.data))
-        self.t=self.t/self.outputsamplerate
+        self.t=self.t/self.out['samplerate']
 
         if self.hasbaselinebeenset==0:
             self.baseline=np.median(self.data)
@@ -321,15 +323,7 @@ class GUIForm(QtGui.QMainWindow):
 
         if loadandplot == True:
             self.Plot()
-            
-    
-    #        if self.v != []:
-    #            self.p1.plot(self.t[2:][:-2],self.v[2:][:-2],pen='r')
-            
-    #        self.w6.clear()
-    #        f, Pxx_den = signal.welch(self.data*10**12, self.outputsamplerate, nperseg = self.outputsamplerate)
-    #        self.w6.plot(x = f[1:], y = Pxx_den[1:], pen = 'b')
-    #        self.w6.setXRange(0,np.log10(self.outputsamplerate))
+
     def Plot(self):
         self.p1.clear()
         self.p1.setDownsampling(ds=True)
@@ -350,13 +344,12 @@ class GUIForm(QtGui.QMainWindow):
         self.p3.addItem(aphhist)
 
         self.ui.label_2.setText('Output Samplerate ' + str(pg.siScale(np.float(self.outputsamplerate))[1]))
-        try:
-            if self.out['type']=='Axopatch':
-                print('Replot')
-                self.voltagepl.clear()
-                self.voltagepl.plot(self.t[2:][:-2], self.vdata[2:][:-2], pen='b')
-        except:
-            return
+
+        self.voltagepl.clear()
+        if self.out['type'] == 'ChimeraRaw':
+            self.voltagepl.addLine(y=self.out['voltage'], pen='b')
+        self.voltagepl.plot(self.t[2:][:-2], self.vdata[2:][:-2], pen='b')
+
 
     def getfile(self):
 
@@ -1175,40 +1168,40 @@ class GUIForm(QtGui.QMainWindow):
         
         print('\007')
         
+    def IVAxis(self):
+        self.xaxisIV = self.ui.IVxaxis.currentIndex()
+        self.yaxisIV = self.ui.IVyaxis.currentIndex()
 
     def sizethepore(self):
         self.ps = PoreSizer()
         self.ps.show()
 
     def makeIV(self):
-        output = self.out
-
-        ## first dock gets save/restore buttons
-        w1 = pg.LayoutWidget()
-        label = QtGui.QLabel("This interface makes IVs and calculates pore sizes!")
-        saveBtn = QtGui.QPushButton('Save dock state')
-        restoreBtn = QtGui.QPushButton('Restore dock state')
-        restoreBtn.setEnabled(False)
-        w1.addWidget(label, row=0, col=0)
-        w1.addWidget(saveBtn, row=1, col=0)
-        w1.addWidget(restoreBtn, row=2, col=0)
-
-        xlab = 'i2'
-        ylab = 'v1'
-        (AllData, a) = uf.CutDataIntoVoltageSegments(output, delay=1, plotSegments=1, x=xlab,
-                                                                                y=ylab)
+        if self.yaxisIV == 0:
+            xlab = 'i1'
+        if self.yaxisIV == 1:
+            xlab = 'i2'
+        if self.xaxisIV == 0:
+            ylab = 'v1'
+        if self.xaxisIV == 1:
+            ylab = 'v2'
+        self.cutplot.clear()
+        (AllData, a) = uf.CutDataIntoVoltageSegments(self.out, delay=1, plotSegments=1, x=xlab,
+                                                                                y=ylab, extractedSegments = self.cutplot)
         if AllData is not 0:
             # Make IV
-            (IVData, b) = uf.MakeIV(AllData, plot=1)
+            (IVData, b) = uf.MakeIV(AllData, plot=0)
             # Fit IV
-            (FitValues, c) = uf.FitIV(IVData, x=xlab, y=ylab)
+            self.ivplota.clear()
+            (FitValues, iv) = uf.FitIV(IVData, x=xlab, y=ylab, iv=self.ivplota)
 
-        win2.setCentralWidget(c)
-
-        print(
-            pg.siFormat(1 / FitValues['Slope'], precision=3, suffix='Ohm', space=True, error=None, minVal=1e-25,
-                               allowUnicode=True))
-
+    def customCond(self):
+        if self.ui.customconductancecheckBox.checkState():
+            self.ui.customConductanceSpinBox.setVisible(True)
+            self.useCustomConductance=1
+        else:
+            self.ui.customConductanceSpinBox.setVisible(False)
+            self.useCustomConductance=0
 def start():
     app = QtGui.QApplication(sys.argv)
     myapp = GUIForm()

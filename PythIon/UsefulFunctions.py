@@ -56,7 +56,7 @@ def ImportAxopatchData(datafilename):
 
 def ImportChimeraRaw(datafilename):
     matfile=io.loadmat(str(os.path.splitext(datafilename)[0]))
-    buffersize=matfile['DisplayBuffer']
+    #buffersize=matfile['DisplayBuffer']
     data = np.fromfile(datafilename, np.dtype('<u2'))
     samplerate = np.float64(matfile['ADCSAMPLERATE'])
     TIAgain = np.int32(matfile['SETUP_TIAgain'])
@@ -70,7 +70,7 @@ def ImportChimeraRaw(datafilename):
     data = -ADCvref + (2 * ADCvref) * (data & bitmask) / 2 ** 16
     data = (data / closedloop_gain + currentoffset)
     data.shape = [data.shape[1], ]
-    output={'current': data, 'voltage': np.float64(matfile['SETUP_mVoffset']), 'samplerate': samplerate, 'type': 'ChimeraRaw', 'filename': datafilename}
+    output = {'matfilename': str(os.path.splitext(datafilename)[0]),'current': data, 'voltage': np.float64(matfile['SETUP_mVoffset']), 'samplerate': samplerate, 'type': 'ChimeraRaw', 'filename': datafilename}
     return output
 
 def ImportChimeraData(datafilename):
@@ -80,7 +80,7 @@ def ImportChimeraData(datafilename):
         data=np.fromfile(datafilename, np.dtype('float64'))
         buffersize=matfile['DisplayBuffer']
         out=Reshape1DTo2D(data, buffersize)
-        output={'current': out['i1'], 'voltage':out['v1'], 'samplerate':samplerate, 'type': 'ChimeraNotRaw', 'filename': datafilename}
+        output={'current': out['i1'], 'voltage': out['v1'], 'samplerate':samplerate, 'type': 'ChimeraNotRaw', 'filename': datafilename}
     else:
         output = ImportChimeraRaw(datafilename)
     return output
@@ -193,7 +193,7 @@ def PlotData(output):
         fig_handles = {'Fig1': 0, 'Fig2': figure2, 'Zoom1': 0, 'Zoom2': f2}
         return fig_handles
 
-def CutDataIntoVoltageSegments(output, delay=0.7, plotSegments = 1, x='i1', y='v1'):
+def CutDataIntoVoltageSegments(output, delay=0.7, plotSegments = 1, x='i1', y='v1', extractedSegments = ''):
     if output['type'] == 'ChimeraNotRaw':
         current = output['current']
         voltage = output['voltage']
@@ -235,17 +235,25 @@ def CutDataIntoVoltageSegments(output, delay=0.7, plotSegments = 1, x='i1', y='v
         return (0,0)
 
     #   Store All Data
-    AllData = {}
+    AllDataList = []
     # First
-    AllData[str(Values[0])] = current[0:ChangePoints[0]]
+    Item={}
+    Item['Voltage'] = Values[0]
+    Item['CurrentTrace'] = current[0:ChangePoints[0]]
+    AllDataList.append(Item)
     for i in range(1, len(Values) - 1):
-        AllData[str(Values[i])] = current[ChangePoints[i - 1] + delayinpoints:ChangePoints[i]]
+        Item={}
+        Item['CurrentTrace'] = current[ChangePoints[i - 1] + delayinpoints:ChangePoints[i]]
+        Item['Voltage']=Values[i]
+        AllDataList.append(Item)
     # Last
-    AllData[str(Values[len(Values) - 1])] = current[
-                                            ChangePoints[len(ChangePoints) - 1] + delayinpoints:len(current) - 1]
+    Item = {}
+    Item['CurrentTrace'] = current[ChangePoints[len(ChangePoints) - 1] + delayinpoints:len(current) - 1]
+    Item['Voltage']= Values[len(Values) - 1]
+    AllDataList.append(Item)
     if plotSegments:
 
-        extractedSegments = pg.PlotWidget(title="Extracted Parts")
+        #extractedSegments = pg.PlotWidget(title="Extracted Parts")
         extractedSegments.plot(time, current, pen='b')
         extractedSegments.setLabel('left', text='Current', units='A')
         extractedSegments.setLabel('bottom', text='Time', units='s')
@@ -258,19 +266,20 @@ def CutDataIntoVoltageSegments(output, delay=0.7, plotSegments = 1, x='i1', y='v
             extractedSegments.plot(np.arange(ChangePoints[len(ChangePoints) - 1] + delayinpoints, len(current) - 1 )/samplerate, current[ChangePoints[len(ChangePoints) - 1] + delayinpoints:len(current) - 1], pen='r')
     else:
         extractedSegments=0
-    return (AllData, extractedSegments)
+    return (AllDataList, extractedSegments)
 
 def MakeIV(CutData, plot=0):
-    l=len(CutData.keys())
+    l=len(CutData)
     IVData={}
-    IVData['Voltage']=np.zeros(l)
-    IVData['Mean']=np.zeros(l)
-    IVData['STD']=np.zeros(l)
+    IVData['Voltage'] = np.zeros(l)
+    IVData['Mean'] = np.zeros(l)
+    IVData['STD'] = np.zeros(l)
     count=0
     for i in CutData:
-        IVData['Voltage'][count] = np.float32(i)
-        IVData['Mean'][count] = np.mean(CutData[i])
-        IVData['STD'][count] = np.std(CutData[i])
+        #print('Voltage: ' + str(i['Voltage']) + ', length: ' + str(len(i['CurrentTrace'])))
+        IVData['Voltage'][count] = np.float32(i['Voltage'])
+        IVData['Mean'][count] = np.mean(i['CurrentTrace'])
+        IVData['STD'][count] = np.std(i['CurrentTrace'])
         count+=1
     if plot:
         spacing=np.sort(IVData['Voltage'])
@@ -284,14 +293,14 @@ def MakeIV(CutData, plot=0):
         iv=0
     return (IVData, iv)
 
-def FitIV(IVData, plot=1, x='i1', y='v1'):
+def FitIV(IVData, plot=1, x='i1', y='v1', iv=0):
     sigma_v=1e-12*np.ones(len(IVData['Voltage']))
     (a, b, sigma_a, sigma_b, b_save) = YorkFit(IVData['Voltage'], IVData['Mean'], sigma_v, IVData['STD'])
     x_fit=np.linspace(min(IVData['Voltage']), max(IVData['Voltage']), 1000)
     y_fit=scipy.polyval([b,a], x_fit)
     if plot:
         spacing=np.sort(IVData['Voltage'])
-        iv = pg.PlotWidget(title='Current-Voltage Plot', background=None)
+        #iv = pg.PlotWidget(title='Current-Voltage Plot', background=None)
         err = pg.ErrorBarItem(x=IVData['Voltage'], y=IVData['Mean'], top=IVData['STD'],
                               bottom=IVData['STD'], pen='b', beam=((spacing[1]-spacing[0]))/2)
         iv.addItem(err)
@@ -301,10 +310,12 @@ def FitIV(IVData, plot=1, x='i1', y='v1'):
         iv.plot(x_fit, y_fit, pen='r')
         textval=pg.siFormat(1/b, precision=5, suffix='Ohm', space=True, error=None, minVal=1e-25, allowUnicode=True)
         textit=pg.TextItem(text=textval, color=(0, 0, 0))
+        textit.setPos(min(IVData['Voltage']),max(IVData['Mean']))
         iv.addItem(textit)
+
     else:
         iv=0
-    YorkFitValues={'Yintercept':a, 'Slope':b, 'Sigma_Yintercept':sigma_a, 'Sigma_Slope':sigma_b, 'Parameter':b_save}
+    YorkFitValues={'x_fit': x_fit, 'y_fit': y_fit, 'Yintercept':a, 'Slope':b, 'Sigma_Yintercept':sigma_a, 'Sigma_Slope':sigma_b, 'Parameter':b_save}
     return (YorkFitValues, iv)
 
 def YorkFit(X, Y, sigma_X, sigma_Y, r=0):
