@@ -10,6 +10,7 @@ from UserInterface import *
 #from plotgui4k import *
 #from plotguiretina import *
 import pyqtgraph as pg
+import pyqtgraph.exporters
 from pyqtgraph.dockarea import *
 import pandas.io.parsers
 import pandas as pd
@@ -19,6 +20,7 @@ from PoreSizer import *
 from batchinfo import *
 import UsefulFunctions as uf
 import scipy
+import matplotlib
 
 class GUIForm(QtGui.QMainWindow):
 
@@ -55,7 +57,7 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.ndChannel.clicked.connect(self.Channel2Button)
         self.ui.makeIVButton.clicked.connect(self.makeIV)
         self.ui.customconductancecheckBox.clicked.connect(self.customCond)
-
+        self.ui.actionSave_All.triggered.connect(self.SaveAllFigures)
         #        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
 
         ###### Setting up plotting elements and their respective options######
@@ -90,7 +92,8 @@ class GUIForm(QtGui.QMainWindow):
         #self.ivplot.setLabel('bottom', text='Current', units='A')
         #self.ivplot.setLabel('left', text='Voltage', units='V')
         #self.ivplot.enableAutoRange(axis = 'x')
-
+        self.psdplot = self.ui.powerSpecPlot
+        self.psdplot.setBackground('w')
         self.cutplot = self.ui.cutData
         #self.cutplot.setLabel('bottom', text='Time', units='s')
         #self.cutplot.setLabel('left', text='Voltage', units='V')
@@ -190,6 +193,7 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.meandtlabel.clear()
         self.totalplotpoints=len(self.p2.data)
         self.ui.eventnumberentry.setText(str(0))
+        self.hasbaselinebeenset=0
 
 
 
@@ -330,9 +334,9 @@ class GUIForm(QtGui.QMainWindow):
         # skips plotting first and last two points, there was a weird spike issue
         self.p1.plot(self.t[2:][:-2], self.data[2:][:-2], pen='b')
 
-        if str(os.path.splitext(self.datafilename)[1]) != '.abf':
-            self.p1.addLine(y=self.baseline, pen='g')
-            self.p1.addLine(y=self.threshold, pen='r')
+        #if str(os.path.splitext(self.datafilename)[1]) != '.abf':
+        #    self.p1.addLine(y=self.baseline, pen='g')
+        #    self.p1.addLine(y=self.threshold, pen='r')
 
         self.p1.autoRange()
 
@@ -350,6 +354,13 @@ class GUIForm(QtGui.QMainWindow):
             self.voltagepl.addLine(y=self.out['voltage'], pen='b')
         self.voltagepl.plot(self.t[2:][:-2], self.vdata[2:][:-2], pen='b')
 
+        self.psdplot.clear()
+        uf.MakePSD(self.data, self.outputsamplerate, self.psdplot)
+        siSamplerate = pg.siScale(self.outputsamplerate)
+        siSTD = pg.siScale(np.std(self.data))
+
+        self.ui.SampleRateLabel.setText('Samplerate: ' + str(self.outputsamplerate*siSamplerate[0]) + siSamplerate[1] + 'Hz')
+        self.ui.STDLabel.setText('STD: ' + str(siSTD[0]*np.std(self.data)) + siSTD[1] + 'A')
 
     def getfile(self):
 
@@ -369,7 +380,6 @@ class GUIForm(QtGui.QMainWindow):
         except IOError:
             #### if user cancels during file selection, exit loop#############
             return
-            
 
     def analyze(self):
         global startpoints,endpoints, mins
@@ -1195,6 +1205,7 @@ class GUIForm(QtGui.QMainWindow):
             self.ivplota.clear()
             (FitValues, iv) = uf.FitIV(IVData, x=xlab, y=ylab, iv=self.ivplota)
 
+
     def customCond(self):
         if self.ui.customconductancecheckBox.checkState():
             self.ui.customConductanceSpinBox.setVisible(True)
@@ -1202,6 +1213,37 @@ class GUIForm(QtGui.QMainWindow):
         else:
             self.ui.customConductanceSpinBox.setVisible(False)
             self.useCustomConductance=0
+
+    def SaveAllFigures(self):
+        figurestosave=[self.psdplot.plotItem, self.ivplota.plotItem, self.p1]
+        name=['PSD', 'IV', 'Trace']
+        print(figurestosave)
+        for index, fig in enumerate(figurestosave):
+            QtGui.QApplication.processEvents()
+            # set export parameters if needed
+            #exporter.parameters()['width'] = 5000  # (note this also affects height parameter
+            # plot export area
+            export_area = pg.GraphicsLayoutWidget(border=(50, 50, 50))
+            # Configure the colors:
+            export_area.setBackground('w')
+            # We resize the widget to our desired export dimensions.
+            # When the widget is hidden, the child widgets do not get resized.
+            # Only when the widget is made visible, the events are propagated to the child widgets.
+            # We immediately hide the widget again to prevent a pop-up or flashing screen.
+            export_area.addPlot(fig)
+            export_area.resize(2000, 1000)
+            export_area.setVisible(True)
+            export_area.setVisible(False)
+            exporter = pg.exporters.ImageExporter(export_area)
+
+            # save to file
+            paths=os.path.split(self.datafilename)
+            direc=paths[0] + os.path.sep + paths[1][:-4] + ' Images'
+            print(direc)
+            if not os.path.isdir(direc):
+                os.mkdir(direc)
+            exporter.export(direc + os.path.sep + name[index] + '_figure.png')
+
 def start():
     app = QtGui.QApplication(sys.argv)
     myapp = GUIForm()

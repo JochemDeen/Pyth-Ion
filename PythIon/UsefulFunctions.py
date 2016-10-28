@@ -3,6 +3,7 @@ import scipy
 import scipy.signal as sig
 import os
 from scipy import io
+from scipy import signal
 from PyQt5 import QtGui, QtWidgets
 import matplotlib.pyplot as plt
 from numpy import linalg as lin
@@ -317,6 +318,15 @@ def FitIV(IVData, plot=1, x='i1', y='v1', iv=0):
         iv=0
     YorkFitValues={'x_fit': x_fit, 'y_fit': y_fit, 'Yintercept':a, 'Slope':b, 'Sigma_Yintercept':sigma_a, 'Sigma_Slope':sigma_b, 'Parameter':b_save}
     return (YorkFitValues, iv)
+
+def MakePSD(input, samplerate, fig):
+    f, Pxx_den = scipy.signal.periodogram(input, samplerate)
+    #f, Pxx_den = scipy.signal.welch(input, samplerate, nperseg=10*256, scaling='spectrum')
+    fig.setLabel('left', 'PSD', units='A^2/Hz')
+    fig.setLabel('bottom', 'Frequency', units='Hz')
+    fig.setLogMode(x=True, y=True)
+    fig.plot(f, Pxx_den, pen='k')
+    return (f,Pxx_den)
 
 def YorkFit(X, Y, sigma_X, sigma_Y, r=0):
     N_itermax=10 #maximum number of interations

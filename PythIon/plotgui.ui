@@ -1419,7 +1419,7 @@
        <item row="1" column="0">
         <widget class="QTabWidget" name="tabWidget_2">
          <property name="currentIndex">
-          <number>3</number>
+          <number>4</number>
          </property>
          <widget class="QWidget" name="tab">
           <attribute name="title">
@@ -2287,6 +2287,67 @@ border-color: rgb(0, 0, 0);</string>
            </property>
           </widget>
          </widget>
+         <widget class="QWidget" name="tab_5">
+          <attribute name="title">
+           <string>Power Spectrum</string>
+          </attribute>
+          <widget class="PlotWidget" name="powerSpecPlot">
+           <property name="geometry">
+            <rect>
+             <x>290</x>
+             <y>10</y>
+             <width>761</width>
+             <height>221</height>
+            </rect>
+           </property>
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="font">
+            <font>
+             <family>Arial</family>
+             <pointsize>8</pointsize>
+             <weight>50</weight>
+             <bold>false</bold>
+            </font>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">border-color: rgb(0, 0, 0);</string>
+           </property>
+           <property name="frameShape">
+            <enum>QFrame::StyledPanel</enum>
+           </property>
+          </widget>
+          <widget class="QLabel" name="STDLabel">
+           <property name="geometry">
+            <rect>
+             <x>10</x>
+             <y>30</y>
+             <width>271</width>
+             <height>16</height>
+            </rect>
+           </property>
+           <property name="text">
+            <string>TextLabel</string>
+           </property>
+          </widget>
+          <widget class="QLabel" name="SampleRateLabel">
+           <property name="geometry">
+            <rect>
+             <x>10</x>
+             <y>70</y>
+             <width>271</width>
+             <height>16</height>
+            </rect>
+           </property>
+           <property name="text">
+            <string>TextLabel</string>
+           </property>
+          </widget>
+         </widget>
         </widget>
        </item>
       </layout>
@@ -2315,8 +2376,15 @@ border-color: rgb(0, 0, 0);</string>
      <string>Edit</string>
     </property>
    </widget>
+   <widget class="QMenu" name="menuFigure_Saving">
+    <property name="title">
+     <string>Figure Saving</string>
+    </property>
+    <addaction name="actionSave_All"/>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuEdit"/>
+   <addaction name="menuFigure_Saving"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="actionInvert">
@@ -2337,6 +2405,11 @@ border-color: rgb(0, 0, 0);</string>
   <action name="actionBatch_Process">
    <property name="text">
     <string>Batch Process</string>
+   </property>
+  </action>
+  <action name="actionSave_All">
+   <property name="text">
+    <string>Save All</string>
    </property>
   </action>
  </widget>
