@@ -56,8 +56,12 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.Poresizeraction.triggered.connect(self.sizethepore)
         self.ui.ndChannel.clicked.connect(self.Channel2Button)
         self.ui.makeIVButton.clicked.connect(self.makeIV)
-        self.ui.customconductancecheckBox.clicked.connect(self.customCond)
         self.ui.actionSave_All.triggered.connect(self.SaveAllFigures)
+        self.ui.groupBox_5.clicked.connect(self.customCond)
+        self.ui.customCurrent.valueChanged.connect(self.UpdateIV)
+        self.ui.customVoltage.valueChanged.connect(self.UpdateIV)
+        self.ui.customConductanceSpinBox.valueChanged.connect(self.UpdateIV)
+
         #        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
 
         ###### Setting up plotting elements and their respective options######
@@ -148,10 +152,13 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.conductanceText.setText('Conductance: ')
         self.ui.resistanceText.setText('Resistance: ')
         self.ui.poresizeOutput.setText('Pore Size: ')
-        self.ui.customConductanceSpinBox.setVisible(False)
         self.useCustomConductance = 0
+        self.conductance = 1e-9
         self.ui.porelengthValue.setOpts(value=0.7E-9, suffix='m', siPrefix=True, dec=True, step=1e-9, minStep=1e-9)
-        self.ui.concentrationValue.setOpts(value=1, suffix='M', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+        self.ui.concentrationValue.setOpts(value=10, suffix='S/m', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+        self.ui.customCurrent.setOpts(value=10e-9, suffix='A', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+        self.ui.customVoltage.setOpts(value=500e-3, suffix='V', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+        self.ui.customConductanceSpinBox.setOpts(value=10e-9/500e-3, suffix='S', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
 
         ####### Initializing various variables used for analysis##############
         self.xaxisIV=self.ui.IVxaxis.currentIndex()
@@ -990,8 +997,8 @@ class GUIForm(QtGui.QMainWindow):
             self.nextevent()
         if key == QtCore.Qt.Key_Left:
             self.previousevent()
-        if key == QtCore.Qt.Key_Return:
-            self.Load()
+    #    if key == QtCore.Qt.Key_Return:
+    #        self.Load()
         if key == QtCore.Qt.Key_Space:
             self.analyze()
         if key == QtCore.Qt.Key_Delete:
@@ -1204,15 +1211,36 @@ class GUIForm(QtGui.QMainWindow):
             # Fit IV
             self.ivplota.clear()
             (FitValues, iv) = uf.FitIV(IVData, x=xlab, y=ylab, iv=self.ivplota)
+            self.conductance=FitValues['Slope']
+            self.UpdateIV()
+        # Update Conductance
 
+    def UpdateIV(self):
+        self.ui.conductanceText.setText('Conductance: ' + pg.siFormat(self.conductance, precision=5, suffix='S', space=True, error=None, minVal=1e-25, allowUnicode=True))
+        self.ui.resistanceText.setText('Resistance: ' + pg.siFormat(1/self.conductance, precision=5, suffix='Ohm', space=True, error=None, minVal=1e-25, allowUnicode=True))
+        if self.useCustomConductance:
+            self.ui.customConductanceSpinBox.setValue(self.ui.customCurrent.value()/self.ui.customVoltage.value())
+            valuetoupdate=np.float(self.ui.customConductanceSpinBox.value())
+        else:
+            valuetoupdate=self.conductance
+        print(self.ui.porelengthValue.value())
+        print(valuetoupdate)
+        print(self.ui.concentrationValue.value())
+        size=uf.CalculatePoreSize(valuetoupdate, self.ui.porelengthValue.value(), self.ui.concentrationValue.value())
+        self.ui.poresizeOutput.setText('Pore Size: ' + pg.siFormat(size, precision=5, suffix='m', space=True, error=None, minVal=1e-25, allowUnicode=True))
 
     def customCond(self):
-        if self.ui.customconductancecheckBox.checkState():
-            self.ui.customConductanceSpinBox.setVisible(True)
-            self.useCustomConductance=1
+        if self.ui.groupBox_5.isChecked():
+            self.useCustomConductance = 1
+            self.ui.conductanceText.setEnabled(False)
+            self.ui.resistanceText.setEnabled(False)
+            self.UpdateIV()
         else:
-            self.ui.customConductanceSpinBox.setVisible(False)
-            self.useCustomConductance=0
+            self.useCustomConductance = 0
+            self.ui.conductanceText.setEnabled(True)
+            self.ui.resistanceText.setEnabled(True)
+            self.UpdateIV()
+
 
     def SaveAllFigures(self):
         figurestosave=[self.psdplot.plotItem, self.ivplota.plotItem, self.p1]
