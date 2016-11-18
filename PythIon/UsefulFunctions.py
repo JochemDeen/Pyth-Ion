@@ -11,20 +11,30 @@ import pyqtgraph as pg
 
 
 def Reshape1DTo2D(inputarray, buffersize):
-    npieces= np.uint16(len(inputarray)/buffersize)
-    voltages=np.array([])
-    currents=np.array([])
+    npieces = np.uint16(len(inputarray)/buffersize)
+    voltages = np.array([], dtype=np.float64)
+    currents = np.array([], dtype=np.float64)
+    #print(npieces)
+
     for i in range(1, npieces+1):
         if i % 2 == 1:
-            currents = np.append(currents, inputarray[(i-1)*buffersize:i*buffersize-1])
+            currents = np.append(currents, inputarray[(i-1)*buffersize:i*buffersize-1], axis=0)
             #print('Length Currents: {}'.format(len(currents)))
         else:
-            voltages = np.append(voltages, inputarray[(i-1)*buffersize:i*buffersize-1])
+            voltages = np.append(voltages, inputarray[(i-1)*buffersize:i*buffersize-1], axis=0)
             #print('Length Voltages: {}'.format(len(voltages)))
-    out = {'v1': voltages*1e-3, 'i1': currents*1e-9}
+
+    v1 = np.ones((1, len(voltages)), dtype=np.float64)
+    i1 = np.ones((1, len(currents)), dtype=np.float64)
+    v1[:]=voltages
+    i1[:]=currents
+
+    out = {'v1': v1, 'i1': i1}
+    print('Currents:' + str(v1.shape))
+    print('Voltages:' + str(i1.shape))
     return out
 
-def CalculatePoreSize(G,L,s):
+def CalculatePoreSize(G, L, s):
     return (G+np.sqrt(G*(G+16*L*s/np.pi)))/(2*s)
 
 def ImportAxopatchData(datafilename):

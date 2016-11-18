@@ -625,7 +625,7 @@
        <item row="1" column="0">
         <widget class="QTabWidget" name="tabWidget_2">
          <property name="currentIndex">
-          <number>1</number>
+          <number>3</number>
          </property>
          <widget class="QWidget" name="tab">
           <attribute name="title">
@@ -2420,9 +2420,17 @@ border-color: rgb(0, 0, 0);</string>
     </property>
     <addaction name="actionSave_All"/>
    </widget>
+   <widget class="QMenu" name="menuDisplay_Settings">
+    <property name="title">
+     <string>Display Settings</string>
+    </property>
+    <addaction name="actionUse_Clipping"/>
+    <addaction name="actionUse_Downsampling"/>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuEdit"/>
    <addaction name="menuFigure_Saving"/>
+   <addaction name="menuDisplay_Settings"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="actionInvert">
@@ -2448,6 +2456,25 @@ border-color: rgb(0, 0, 0);</string>
   <action name="actionSave_All">
    <property name="text">
     <string>Save All</string>
+   </property>
+  </action>
+  <action name="actionUse_Clipping">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Use Clipping</string>
+   </property>
+  </action>
+  <action name="actionUse_Downsampling">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Use Downsampling</string>
    </property>
   </action>
  </widget>

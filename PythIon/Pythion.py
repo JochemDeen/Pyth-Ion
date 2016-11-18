@@ -61,6 +61,10 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.customCurrent.valueChanged.connect(self.UpdateIV)
         self.ui.customVoltage.valueChanged.connect(self.UpdateIV)
         self.ui.customConductanceSpinBox.valueChanged.connect(self.UpdateIV)
+        self.ui.concentrationValue.valueChanged.connect(self.UpdateIV)
+        self.ui.porelengthValue.valueChanged.connect(self.UpdateIV)
+        self.ui.actionUse_Clipping.triggered.connect(self.DisplaySettings)
+        self.ui.actionUse_Downsampling.triggered.connect(self.DisplaySettings)
 
         #        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
 
@@ -82,14 +86,16 @@ class GUIForm(QtGui.QMainWindow):
         self.p1 = self.ui.signalplot.addPlot()
         self.p1.setLabel('bottom', text='Time', units='s')
         self.p1.setLabel('left', text='Current', units='A')
-        self.p1.enableAutoRange(axis = 'x')
-        self.p1.setDownsampling(ds=True, auto=True, mode='peak')
+        self.p1.enableAutoRange(axis = 'y')
+        self.p1.setDownsampling(ds=False, auto=True, mode='subsample')
+        self.p1.setClipToView(True)
 
         self.voltagepl = self.ui.voltageplotwin.addPlot()
         self.voltagepl.setLabel('bottom', text='Time', units='s')
         self.voltagepl.setLabel('left', text='Voltage', units='V')
-        self.voltagepl.enableAutoRange(axis = 'x')
-        self.voltagepl.setDownsampling(ds=True, auto=True, mode='peak')
+        self.voltagepl.enableAutoRange(axis = 'y')
+        self.voltagepl.setDownsampling(ds=False, auto=True, mode='subsample')
+        self.voltagepl.setClipToView(True)
         self.voltagepl.setXLink(self.p1)
 
         self.ivplota = self.ui.ivplot
@@ -221,6 +227,8 @@ class GUIForm(QtGui.QMainWindow):
                 self.ui.AxopatchGroup.setVisible(1)
                 self.p1.setLabel('left', text='Channel 1 Current', units='A')
                 self.voltagepl.setLabel('left', text='Channel 1 Voltage', units='V')
+            else:
+                self.ui.AxopatchGroup.setVisible(0)
 
 
         if str(os.path.splitext(self.datafilename)[1]) == '.log':
@@ -229,6 +237,7 @@ class GUIForm(QtGui.QMainWindow):
             self.matfilename = str(os.path.splitext(self.datafilename)[0])
             if self.out['type'] == 'ChimeraNotRaw':
                 self.data = self.out['current']
+                print(str(self.data.shape))
                 self.vdata = self.out['voltage']
             else:
                 Wn = round(self.LPfiltercutoff/(self.out['samplerate']/2), 4)
@@ -338,14 +347,17 @@ class GUIForm(QtGui.QMainWindow):
     def Plot(self):
         self.p1.clear()
         self.p1.setDownsampling(ds=True)
+        self.p1.setClipToView(True)
         # skips plotting first and last two points, there was a weird spike issue
-        self.p1.plot(self.t[2:][:-2], self.data[2:][:-2], pen='b')
-
+        #print('Time:'+ str(self.t.shape))
+        #self.p1.plot(self.t[2:][:-2], self.data[2:][:-2], pen='b')
+        self.p1.plot(self.t, self.data, pen='b')
         #if str(os.path.splitext(self.datafilename)[1]) != '.abf':
         #    self.p1.addLine(y=self.baseline, pen='g')
-        #    self.p1.addLine(y=self.threshold, pen='r')
+        #    self
 
         self.p1.autoRange()
+        #self.p1.disableAutoRange(axis=x)
 
         self.p3.clear()
         aphy, aphx = np.histogram(self.data, bins=np.round(len(self.data) / 1000))
@@ -355,11 +367,11 @@ class GUIForm(QtGui.QMainWindow):
         self.p3.addItem(aphhist)
 
         self.ui.label_2.setText('Output Samplerate ' + str(pg.siScale(np.float(self.outputsamplerate))[1]))
-
+        self.voltagepl.autoRange()
         self.voltagepl.clear()
         if self.out['type'] == 'ChimeraRaw':
             self.voltagepl.addLine(y=self.out['voltage'], pen='b')
-        self.voltagepl.plot(self.t[2:][:-2], self.vdata[2:][:-2], pen='b')
+        self.voltagepl.plot(self.t, self.vdata, pen='b')
 
         self.psdplot.clear()
         uf.MakePSD(self.data, self.outputsamplerate, self.psdplot)
@@ -1271,6 +1283,23 @@ class GUIForm(QtGui.QMainWindow):
             if not os.path.isdir(direc):
                 os.mkdir(direc)
             exporter.export(direc + os.path.sep + name[index] + '_figure.png')
+
+    def DisplaySettings(self):
+        if self.ui.actionUse_Clipping.isChecked():
+            self.p1.setClipToView(True)
+            self.Plot()
+        else:
+            self.p1.setClipToView(False)
+            self.Plot()
+        if self.ui.actionUse_Downsampling.isChecked():
+            self.p1.setDownsampling(ds=True, auto=True, mode='subsample')
+            self.Plot()
+        else:
+            self.p1.setDownsampling(ds=False, auto=True, mode='subsample')
+            self.Plot()
+
+
+
 
 def start():
     app = QtGui.QApplication(sys.argv)
