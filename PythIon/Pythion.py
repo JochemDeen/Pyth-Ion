@@ -1304,6 +1304,7 @@ class GUIForm(QtGui.QMainWindow):
             self.Plot()
 
     def plotBothClicked(self):
+        self.p1.clear()
         plot = uf.DoublePlot(self.t, self.out['i1'], self.out['i2'], pw=self.p1)
 
 

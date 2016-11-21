@@ -394,10 +394,9 @@ def SaveFigureList(folder, list):
 
 def DoublePlot(time, i1, i2, pw=0):
     global p1, p2, p3
-    pw.setWindowTitle('pyqtgraph example: MultiplePlotAxes')
     pw.show()
     p1 = pw.plotItem
-    p1.setLabels(left='Axopatch Current')
+    p1.getAxis('left').setLabel('Axopatch Current', color='b')
 
     ## create a new ViewBox, link the right axis to its coordinate system
     p2 = pg.ViewBox()
@@ -405,7 +404,7 @@ def DoublePlot(time, i1, i2, pw=0):
     p1.scene().addItem(p2)
     p1.getAxis('right').linkToView(p2)
     p2.setXLink(p1)
-    p1.getAxis('right').setLabel('axis2', color='#0000ff')
+    p1.getAxis('right').setLabel('Transverse Current', color='r')
 
     # ## create third ViewBox.
     # ## this time we need to create a new axis as well.
@@ -433,6 +432,6 @@ def DoublePlot(time, i1, i2, pw=0):
     updateViews()
     p1.vb.sigResized.connect(updateViews)
 
-    p1.plot(time, i1, pen='r')
-    p2.addItem(pg.PlotCurveItem(time, i2, pen='b'))
+    p1.plot(time, i1, pen='b')
+    p2.addItem(pg.PlotCurveItem(time, i2, pen='r'))
     return pw
