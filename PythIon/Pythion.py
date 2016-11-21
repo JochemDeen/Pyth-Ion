@@ -65,9 +65,9 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.porelengthValue.valueChanged.connect(self.UpdateIV)
         self.ui.actionUse_Clipping.triggered.connect(self.DisplaySettings)
         self.ui.actionUse_Downsampling.triggered.connect(self.DisplaySettings)
-
+        self.ui.actionUse_Clipping.setChecked(False)
         #        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
-
+        self.ui.plotBoth.clicked.connect(self.plotBothClicked)
         ###### Setting up plotting elements and their respective options######
         self.ui.signalplot.setBackground('w')
         self.ui.scatterplot.setBackground('w')
@@ -79,24 +79,25 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.voltageplotwin.setBackground('w')
         self.ui.ivplot.setBackground('w')
         self.ui.cutData.setBackground('w')
+
 #        self.ui.PSDplot.setBackground('w')
         self.ui.AxopatchGroup.setVisible(0)
 
         self.ui.label_2.setText('Output Samplerate (kHz)' + str(pg.siScale(np.float(self.ui.outputsamplerateentry.text()))[1]))
-        self.p1 = self.ui.signalplot.addPlot()
-        self.p1.setLabel('bottom', text='Time', units='s')
-        self.p1.setLabel('left', text='Current', units='A')
-        self.p1.enableAutoRange(axis = 'y')
-        self.p1.setDownsampling(ds=False, auto=True, mode='subsample')
-        self.p1.setClipToView(True)
+        self.p1 = self.ui.signalplot
+        # self.p1.setLabel('bottom', text='Time', units='s')
+        # self.p1.setLabel('left', text='Current', units='A')
+        # self.p1.enableAutoRange(axis='y')
+        # self.p1.setDownsampling(ds=True, auto=True, mode='peak')
+        # self.p1.setClipToView(False)
 
-        self.voltagepl = self.ui.voltageplotwin.addPlot()
-        self.voltagepl.setLabel('bottom', text='Time', units='s')
-        self.voltagepl.setLabel('left', text='Voltage', units='V')
-        self.voltagepl.enableAutoRange(axis = 'y')
-        self.voltagepl.setDownsampling(ds=False, auto=True, mode='subsample')
-        self.voltagepl.setClipToView(True)
-        self.voltagepl.setXLink(self.p1)
+        self.voltagepl = self.ui.voltageplotwin
+        # self.voltagepl.setLabel('bottom', text='Time', units='s')
+        # self.voltagepl.setLabel('left', text='Voltage', units='V')
+        # self.voltagepl.enableAutoRange(axis='y')
+        # self.voltagepl.setDownsampling(ds=True, auto=True, mode='subsample')
+        # self.voltagepl.setClipToView(False)
+        # self.voltagepl.setXLink(self.p1)
 
         self.ivplota = self.ui.ivplot
         #self.ivplot.setLabel('bottom', text='Current', units='A')
@@ -225,8 +226,8 @@ class GUIForm(QtGui.QMainWindow):
             self.ui.outputsamplerateentry.setText(str(self.out['samplerate']))
             if self.out['graphene']:
                 self.ui.AxopatchGroup.setVisible(1)
-                self.p1.setLabel('left', text='Channel 1 Current', units='A')
-                self.voltagepl.setLabel('left', text='Channel 1 Voltage', units='V')
+                #self.p1.setLabel('left', text='Channel 1 Current', units='A')
+                #self.voltagepl.setLabel('left', text='Channel 1 Voltage', units='V')
             else:
                 self.ui.AxopatchGroup.setVisible(0)
 
@@ -346,17 +347,21 @@ class GUIForm(QtGui.QMainWindow):
 
     def Plot(self):
         self.p1.clear()
-        self.p1.setDownsampling(ds=True)
-        self.p1.setClipToView(True)
         # skips plotting first and last two points, there was a weird spike issue
         #print('Time:'+ str(self.t.shape))
         #self.p1.plot(self.t[2:][:-2], self.data[2:][:-2], pen='b')
-        self.p1.plot(self.t, self.data, pen='b')
+        if self.ui.plotBoth.isChecked():
+            self.p1.plot(self.t, self.out['i1'], pen='b')
+            self.p1.plot(self.t, self.out['i2'], pen='r')
+
+        else:
+            self.p1.plot(self.t, self.data, pen='b')
+
         #if str(os.path.splitext(self.datafilename)[1]) != '.abf':
         #    self.p1.addLine(y=self.baseline, pen='g')
         #    self
 
-        self.p1.autoRange()
+        #self.p1.enableAutoScale()
         #self.p1.disableAutoRange(axis=x)
 
         self.p3.clear()
@@ -1298,7 +1303,8 @@ class GUIForm(QtGui.QMainWindow):
             self.p1.setDownsampling(ds=False, auto=True, mode='subsample')
             self.Plot()
 
-
+    def plotBothClicked(self):
+        plot = uf.DoublePlot(self.t, self.out['i1'], self.out['i2'], pw=self.p1)
 
 
 def start():

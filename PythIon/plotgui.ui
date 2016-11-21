@@ -599,7 +599,7 @@
       </property>
       <layout class="QGridLayout" name="gridLayout_4">
        <item row="0" column="0">
-        <widget class="GraphicsLayoutWidget" name="signalplot">
+        <widget class="PlotWidget" name="signalplot">
          <property name="sizePolicy">
           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
            <horstretch>0</horstretch>
@@ -625,13 +625,13 @@
        <item row="1" column="0">
         <widget class="QTabWidget" name="tabWidget_2">
          <property name="currentIndex">
-          <number>3</number>
+          <number>0</number>
          </property>
          <widget class="QWidget" name="tab">
           <attribute name="title">
            <string>Voltage Plot</string>
           </attribute>
-          <widget class="GraphicsLayoutWidget" name="voltageplotwin">
+          <widget class="PlotWidget" name="voltageplotwin">
            <property name="geometry">
             <rect>
              <x>0</x>
@@ -2049,7 +2049,7 @@ border-color: rgb(0, 0, 0);</string>
          <x>220</x>
          <y>0</y>
          <width>101</width>
-         <height>61</height>
+         <height>91</height>
         </rect>
        </property>
        <property name="title">
@@ -2060,8 +2060,8 @@ border-color: rgb(0, 0, 0);</string>
          <rect>
           <x>0</x>
           <y>19</y>
-          <width>101</width>
-          <height>41</height>
+          <width>91</width>
+          <height>71</height>
          </rect>
         </property>
         <layout class="QGridLayout" name="gridLayout_5">
@@ -2069,6 +2069,13 @@ border-color: rgb(0, 0, 0);</string>
           <widget class="QCheckBox" name="ndChannel">
            <property name="text">
             <string>Channel 2</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QCheckBox" name="plotBoth">
+           <property name="text">
+            <string>Plot Both</string>
            </property>
           </widget>
          </item>
