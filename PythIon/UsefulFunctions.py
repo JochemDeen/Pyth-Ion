@@ -2,13 +2,18 @@ import numpy as np
 import scipy
 import scipy.signal as sig
 import os
+import pickle as pkl
 from scipy import io
 from scipy import signal
 from PyQt5 import QtGui, QtWidgets
 import matplotlib.pyplot as plt
 from numpy import linalg as lin
 import pyqtgraph as pg
-
+import matplotlib.pyplot as plt
+import matplotlib
+from matplotlib.backends.backend_pdf import PdfPages
+import pandas as pd
+import h5py
 
 def Reshape1DTo2D(inputarray, buffersize):
     npieces = np.uint16(len(inputarray)/buffersize)
@@ -41,10 +46,12 @@ def ImportAxopatchData(datafilename):
     x=np.fromfile(datafilename, np.dtype('>f4'))
     f=open(datafilename, 'rb')
     graphene=0
-    for i in range(0, 8):
+    for i in range(0, 10):
         a=str(f.readline())
         if 'Acquisition' in a or 'Sample Rate' in a:
             samplerate=int(''.join(i for i in a if i.isdigit()))/1000
+        if 'FEMTO preamp Bandwidth' in a:
+            femtoLP=int(''.join(i for i in a if i.isdigit()))
         if 'I_Graphene' in a:
             graphene=1
             print('This File Has a Graphene Channel!')
@@ -58,10 +65,11 @@ def ImportAxopatchData(datafilename):
         v1 = x[252:end-1:4]
         #graphene voltage
         v2 = x[253:end:4]
-        output={'type': 'Axopatch', 'graphene': 1, 'samplerate': samplerate, 'i1': i1, 'v1': v1, 'i2': i2, 'v2': v2, 'filename': datafilename}
+        print('The femto was set to : {} Hz, if this value was correctly entered in the LabView!'.format(str(femtoLP)))
+        output={'FemtoLowPass': femtoLP, 'type': 'Axopatch', 'graphene': 1, 'samplerate': samplerate, 'i1': i1, 'v1': v1, 'i2': i2, 'v2': v2, 'filename': datafilename}
     else:
-        i1 = x[250:end-1:2]
-        v1 = x[251:end:2]
+        i1 = np.array(x[250:end-1:2])
+        v1 = np.array(x[251:end:2])
         output={'type': 'Axopatch', 'graphene': 0, 'samplerate': samplerate, 'i1': i1, 'v1': v1, 'filename': datafilename}
     return output
 
@@ -96,7 +104,7 @@ def ImportChimeraData(datafilename):
         output = ImportChimeraRaw(datafilename)
     return output
 
-def OpenFile(filename=''):
+def OpenFile(filename = ''):
     if filename == '':
         datafilename = QtGui.QFileDialog.getOpenFileName()
         datafilename=datafilename[0]
@@ -111,7 +119,7 @@ def OpenFile(filename=''):
         output = ImportChimeraData(datafilename)
     return output
 
-def zoom_factory(ax,base_scale = 2.):
+def zoom_factory(ax, base_scale = 2.):
     def zoom_fun(event):
         # get the current x and y limits
         cur_xlim = ax.get_xlim()
@@ -305,12 +313,12 @@ def MakeIV(CutData, plot=0):
     return (IVData, iv)
 
 def FitIV(IVData, plot=1, x='i1', y='v1', iv=0):
-    sigma_v=1e-12*np.ones(len(IVData['Voltage']))
+    sigma_v = 1e-12*np.ones(len(IVData['Voltage']))
     (a, b, sigma_a, sigma_b, b_save) = YorkFit(IVData['Voltage'], IVData['Mean'], sigma_v, IVData['STD'])
-    x_fit=np.linspace(min(IVData['Voltage']), max(IVData['Voltage']), 1000)
-    y_fit=scipy.polyval([b,a], x_fit)
+    x_fit = np.linspace(min(IVData['Voltage']), max(IVData['Voltage']), 1000)
+    y_fit = scipy.polyval([b,a], x_fit)
     if plot:
-        spacing=np.sort(IVData['Voltage'])
+        spacing = np.sort(IVData['Voltage'])
         #iv = pg.PlotWidget(title='Current-Voltage Plot', background=None)
         err = pg.ErrorBarItem(x=IVData['Voltage'], y=IVData['Mean'], top=IVData['STD'],
                               bottom=IVData['STD'], pen='b', beam=((spacing[1]-spacing[0]))/2)
@@ -319,15 +327,28 @@ def FitIV(IVData, plot=1, x='i1', y='v1', iv=0):
         iv.setLabel('left', text=x + ', Current', units='A')
         iv.setLabel('bottom', text=y + ', Voltage', units='V')
         iv.plot(x_fit, y_fit, pen='r')
-        textval=pg.siFormat(1/b, precision=5, suffix='Ohm', space=True, error=None, minVal=1e-25, allowUnicode=True)
-        textit=pg.TextItem(text=textval, color=(0, 0, 0))
-        textit.setPos(min(IVData['Voltage']),max(IVData['Mean']))
+        textval = pg.siFormat(1/b, precision=5, suffix='Ohm', space=True, error=None, minVal=1e-25, allowUnicode=True)
+        textit = pg.TextItem(text=textval, color=(0, 0, 0))
+        textit.setPos(min(IVData['Voltage']), max(IVData['Mean']))
         iv.addItem(textit)
 
     else:
         iv=0
     YorkFitValues={'x_fit': x_fit, 'y_fit': y_fit, 'Yintercept':a, 'Slope':b, 'Sigma_Yintercept':sigma_a, 'Sigma_Slope':sigma_b, 'Parameter':b_save}
     return (YorkFitValues, iv)
+
+def ExportIVData(self):
+    f = h5py.File(self.matfilename + '_IVData.hdf5', "w")
+    ivdata = f.create_group("IVData")
+    for k, l in self.IVData.items():
+        ivdata.create_dataset(k, data=l)
+    fitdata = f.create_group("FitData")
+    for k, l in self.FitValues.items():
+        fitdata.create_dataset(k, data=l)
+    Data={}
+    Data['IVFit']=self.FitValues
+    Data['IVData']=self.IVData
+    scipy.io.savemat(self.matfilename + '_IVData.mat', Data, appendmat=True)
 
 def MakePSD(input, samplerate, fig):
     f, Pxx_den = scipy.signal.periodogram(input, samplerate)
@@ -390,48 +411,849 @@ def SaveFigureList(folder, list):
             list[i].savefig(dirname+os.sep+filename+'_'+i+'.png', format='png')
     return 0
 
-
-
-def DoublePlot(time, i1, i2, pw=0):
-    global p1, p2, p3
-    pw.show()
-    p1 = pw.plotItem
-    p1.getAxis('left').setLabel('Axopatch Current', color='b')
-
+def DoublePlot(self):
+    p1 = self.p1.plotItem
+    p1_v = self.voltagepl.plotItem
+    p1.getAxis('left').setLabel(text='Ionic Current', color='#0000FF', units='A')
+    p1_v.getAxis('left').setLabel(text='Ionic Voltage', color='#0000FF', units='V')
     ## create a new ViewBox, link the right axis to its coordinate system
-    p2 = pg.ViewBox()
     p1.showAxis('right')
-    p1.scene().addItem(p2)
-    p1.getAxis('right').linkToView(p2)
-    p2.setXLink(p1)
-    p1.getAxis('right').setLabel('Transverse Current', color='r')
+    p1_v.showAxis('right')
+    p1.scene().addItem(self.transverseAxis)
+    p1_v.scene().addItem(self.transverseAxisVoltage)
+    p1.getAxis('right').linkToView(self.transverseAxis)
+    p1_v.getAxis('right').linkToView(self.transverseAxisVoltage)
+    self.transverseAxis.setXLink(p1)
+    self.transverseAxisVoltage.setXLink(p1_v)
+    self.transverseAxis.show()
+    self.transverseAxisVoltage.show()
+    p1.getAxis('right').setLabel(text='Transverse Current', color='#FF0000', units='A')
+    p1_v.getAxis('right').setLabel(text='Transverse Voltage', color='#FF0000', units='V')
 
-    # ## create third ViewBox.
-    # ## this time we need to create a new axis as well.
-    # p3 = pg.ViewBox()
-    # ax3 = pg.AxisItem('right')
-    # p1.layout.addItem(ax3, 2, 3)
-    # p1.scene().addItem(p3)
-    # ax3.linkToView(p3)
-    # p3.setXLink(p1)
-    # ax3.setZValue(-10000)
-    # ax3.setLabel('axis 3', color='#ff0000')
-
-    ## Handle view resizing
     def updateViews():
         ## view has resized; update auxiliary views to match
-        p2.setGeometry(p1.vb.sceneBoundingRect())
-        #p3.setGeometry(p1.vb.sceneBoundingRect())
+        self.transverseAxis.setGeometry(p1.vb.sceneBoundingRect())
+        self.transverseAxisVoltage.linkedViewChanged(p1_v.vb, self.transverseAxisVoltage.XAxis)
+        self.transverseAxisVoltage.setGeometry(p1_v.vb.sceneBoundingRect())
+        self.transverseAxis.linkedViewChanged(p1.vb, self.transverseAxis.XAxis)
 
-        ## need to re-update linked axes since this was called
-        ## incorrectly while views had different shapes.
-        ## (probably this should be handled in ViewBox.resizeEvent)
-        p2.linkedViewChanged(p1.vb, p2.XAxis)
-       # p3.linkedViewChanged(p1.vb, p3.XAxis)
+    updateViews()
+    p1.vb.sigResized.connect(updateViews)
+    p1_v.vb.sigResized.connect(updateViews)
+    p1.plot(self.t, self.out['i1'], pen='b')
+    p1_v.plot(self.t, self.out['v1'], pen='b')
+    self.transverseAxis.addItem(pg.PlotCurveItem(self.t, self.out['i2'], pen='r'))
+    self.transverseAxisVoltage.addItem(pg.PlotCurveItem(self.t, self.out['v2'], pen='r'))
+
+    #Set Ranges
+    self.transverseAxis.setYRange(np.min(self.out['i2'])-10*np.std(self.out['i2']), np.max(self.out['i2'])+1*np.std(self.out['i2']))
+    self.p1.setYRange(np.min(self.out['i1'])-1*np.std(self.out['i1']), np.max(self.out['i1'])+ 10*np.std(self.out['i1']))
+    self.p1.enableAutoRange(axis='x')
+    self.transverseAxisVoltage.setYRange(np.min(self.out['v2']) - 10/100 * np.mean(self.out['v2']),
+                              np.max(self.out['v2']) + 1/100 * np.mean(self.out['v2']))
+    self.voltagepl.setYRange(np.min(self.out['v1']) - 1/100 * np.mean(self.out['v1']),
+                  np.max(self.out['v1']) + 10/100 * np.mean(self.out['v1']))
+
+def MatplotLibIV(self):
+    #IV
+    if not hasattr(self, 'IVData'):
+        return
+    x_fit = np.linspace(min(self.IVData['Voltage']), max(self.IVData['Voltage']), 1000)
+    y_fit = scipy.polyval([self.FitValues['Slope'], self.FitValues['Yintercept']], x_fit)
+    x_si_params=pg.siScale(max(x_fit))
+    y_si_params=pg.siScale(max(y_fit))
+    plt.figure(1)
+    plt.clf()
+    plt.errorbar(self.IVData['Voltage']*x_si_params[0], self.IVData['Mean']*y_si_params[0], fmt='ob', yerr=self.IVData['STD']*y_si_params[0], linestyle='None')
+    plt.hold(True)
+    textval = pg.siFormat(1 / self.FitValues['Slope'], precision=5, suffix='Ohm', space=True, error=None, minVal=1e-25, allowUnicode=True)
+    plt.annotate(textval, [min(self.IVData['Voltage']*x_si_params[0]), max(self.IVData['Mean']*y_si_params[0])])
+    plt.plot(x_fit*x_si_params[0], y_fit*y_si_params[0], '-r')
+    plt.xlabel('Voltage Channel {} [{}V]'.format(self.xaxisIV+1, x_si_params[1]))
+    plt.ylabel('Current Channel {} [{}A]'.format(self.yaxisIV+1, y_si_params[1]))
+    filename=os.path.splitext(os.path.basename(self.datafilename))[0]
+    dirname=os.path.dirname(self.datafilename)
+    plt.savefig(dirname+os.sep+filename+'_IV_' + str(self.xaxisIV) + str(self.yaxisIV) + '.eps')
+    plt.savefig(dirname+os.sep+filename+'_IV_' + str(self.xaxisIV) + str(self.yaxisIV) + '.png')
+    #plt.show()
+
+def SaveDerivatives(self):
+
+    PartToConsider=np.array(self.p1.viewRange()[0])
+    partinsamples = np.int64(np.round(self.out['samplerate'] * PartToConsider))
+    print(partinsamples)
+    t = self.t[partinsamples[0]:partinsamples[1]]
+    i1part = self.out['i1'][partinsamples[0]:partinsamples[1]]
+    i2part = self.out['i2'][partinsamples[0]:partinsamples[1]]
+
+    plt.figure(1, figsize=(20,7))
+    plt.subplot(2, 1, 1)
+    plt.plot(t, i1part, 'b')
+    plt.title('i1 vs. i2')
+    plt.ylabel('Ionic Current [A]')
+    ax = plt.gca()
+    ax.set_xticklabels([])
+
+    plt.subplot(2, 1, 2)
+    plt.plot(t, i2part, 'r')
+    plt.xlabel('time (s)')
+    plt.ylabel('Transverse Current [A]')
+    self.pp.savefig()
+
+    plt.figure(2, figsize=(20,7))
+    plt.subplot(2, 1, 1)
+    plt.plot(t, i1part, 'b')
+    plt.title('i1 vs. its derivative')
+    plt.ylabel('Ionic Current [A]')
+    ax = plt.gca()
+    ax.set_xticklabels([])
+
+    plt.subplot(2, 1, 2)
+    plt.plot(t[:-1], np.diff(i1part), 'y')
+    plt.xlabel('time (s)')
+    plt.ylabel('d(Ionic Current [A])/dt')
+    self.pp.savefig()
+
+    plt.figure(3, figsize=(20,7))
+    plt.subplot(2, 1, 1)
+    plt.plot(t, i2part, 'r')
+    plt.title('i2 vs. its derivative')
+    plt.ylabel('Transverse Current [A]')
+    ax = plt.gca()
+    ax.set_xticklabels([])
+
+    plt.subplot(2, 1, 2)
+    plt.plot(t[:-1], np.diff(i2part), 'y')
+    plt.xlabel('time (s)')
+    plt.ylabel('d(Transverse Current [A])/dt')
+    self.pp.savefig()
+
+def MatplotLibCurrentSignal(self):
+    if not hasattr(self, 'out'):
+        return
+    fig, ax1 = plt.subplots(figsize=(20, 7))
+    if self.ui.plotBoth.isChecked():
+        ax1.plot(self.t, self.out['i1'], 'b-')
+        ax1.set_xlim(self.p1.viewRange()[0])
+        ax1.set_xlabel('time [s]')
+        # Make the y-axis label and tick labels match the line color.
+        ax1.set_ylabel('Ionic Current [A]', color='b')
+        for tl in ax1.get_yticklabels():
+            tl.set_color('b')
+        ax2 = ax1.twinx()
+        ax2.plot(self.t, self.out['i2'], 'r-')
+        ax1.set_xlim(self.p1.viewRange()[0])
+        ax1.set_ylim(self.p1.viewRange()[1])
+        ax2.set_ylabel('Transverse Current [A]', color='r')
+        ax2.set_ylim(self.transverseAxis.viewRange()[1])
+        for tl in ax2.get_yticklabels():
+            tl.set_color('r')
+    elif self.ui.ndChannel.isChecked():
+        ax1.plot(self.t, self.out['i2'], 'r-')
+        ax1.set_xlim(self.p1.viewRange()[0])
+        ax1.set_ylim(self.p1.viewRange()[1])
+        ax1.set_xlabel('time [s]')
+        ax1.set_ylabel('Transverse Current [A]')
+        for tl in ax1.get_yticklabels():
+            tl.set_color('r')
+    else:
+        ax1.plot(self.t, self.out['i1'], 'b-')
+        ax1.set_xlim(self.p1.viewRange()[0])
+        ax1.set_ylim(self.p1.viewRange()[1])
+        ax1.set_xlabel('time [s]')
+        ax1.set_ylabel('Ionic Current [A]')
+
+    #self.pp.savefig()
+
+    #SaveDerivatives(self)
+    #plt.savefig(dirname+os.sep+filename+'_IV_' + str(self.xaxisIV) + str(self.yaxisIV) + '.eps')
+    plt.savefig(self.matfilename + str(self.p1.viewRange()[0][0]) + '_Figure.eps')
+    #plt.show()
+
+def PlotSingle(self):
+    self.p1.clear()
+    self.transverseAxis.clear()
+    self.p1.plotItem.hideAxis('right')
+    self.voltagepl.plotItem.hideAxis('right')
+    self.transverseAxisVoltage.clear()
+    self.p3.clear()
+    self.voltagepl.clear()
+
+    if self.ui.ndChannel.isChecked():
+        temp_i = self.out['i2']
+        temp_v = self.out['v2']
+        self.p1.setLabel('left', text='Transverse Current', units='A')
+        self.voltagepl.setLabel('left', text='Transverse Voltage', units='V')
+    else:
+        temp_i = self.out['i1']
+        temp_v = self.out['v1']
+        self.p1.setLabel('left', text='Ionic Current', units='A')
+        self.voltagepl.setLabel('left', text='Ionic Voltage', units='V')
+
+    self.p1.setLabel('bottom', text='Time', units='s')
+    self.voltagepl.setLabel('bottom', text='Time', units='s')
+
+    self.p1.plot(self.t, temp_i, pen='b')
+    aphy, aphx = np.histogram(temp_i, bins=np.round(len(temp_i) / 1000))
+    aphx = aphx
+
+    aphhist = pg.PlotCurveItem(aphx, aphy, stepMode=True, fillLevel=0, brush='b')
+    self.p3.addItem(aphhist)
+
+    if self.out['type'] == 'ChimeraRaw':
+        self.voltagepl.addLine(y=self.out['voltage'], pen='b')
+    self.voltagepl.plot(self.t, temp_v, pen='b')
+
+    self.psdplot.clear()
+    MakePSD(temp_i, self.out['samplerate'], self.psdplot)
+    siSamplerate = pg.siScale(self.out['samplerate'])
+    siSTD = pg.siScale(np.std(temp_i))
+
+    self.ui.SampleRateLabel.setText(
+        'Samplerate: ' + str(self.out['samplerate'] * siSamplerate[0]) + siSamplerate[1] + 'Hz')
+    self.ui.STDLabel.setText('STD: ' + str(siSTD[0] * np.std(temp_i)) + siSTD[1] + 'A')
+
+    self.voltagepl.enableAutoRange(axis='y')
+    self.p1.enableAutoRange(axis='y')
+
+def SaveToHDF5(self):
+    f = h5py.File(self.matfilename + '_OriginalDB.hdf5', "w")
+    general = f.create_group("General")
+    general.create_dataset('FileName', data=self.out['filename'])
+    general.create_dataset('Samplerate', data=self.out['samplerate'])
+    general.create_dataset('Machine', data=self.out['type'])
+    general.create_dataset('TransverseRecorded', data=self.out['graphene'])
+    segmentation_LP = f.create_group("LowPassSegmentation")
+    for k,l in self.AnalysisResults.items():
+        print(k)
+        set1 = segmentation_LP.create_group(k)
+        lpset1 = set1.create_group('LowPassSettings')
+        for o, p in self.coefficients.items():
+             lpset1.create_dataset(o, data=p)
+        for m, l in self.AnalysisResults[k].items():
+             set1.create_dataset(m, data=l)
+    # #
+    # segmentation_LP.create_dataset('RoughEventLocations', data=self.RoughEventLocations)
+    # segmentation_LP.create_dataset('StartPoints', data=self.startpoints)
+    # segmentation_LP.create_dataset('EndPoints', data=endpoints)
+    # segmentation_LP.create_dataset('LocalBaseline', data=self.localBaseline)
+    # segmentation_LP.create_dataset('LocalVariance', data=self.localVariance)
+    # segmentation_LP.create_dataset('DeltaI', data=self.deli)
+    # segmentation_LP.create_dataset('DwellTime', data=self.dwell)
+    # segmentation_LP.create_dataset('FractionalCurrentDrop', data=self.frac)
+    # segmentation_LP.create_dataset('Frequency', data=self.dt)
+    # segmentation_LP.create_dataset('NumberOfEvents', data=self.numberofevents)
+
+def RecursiveLowPass(signal, coeff):
+    Ni = len(signal)
+    RoughEventLocations = []
+    ml = np.zeros((Ni, 1))
+    vl = np.zeros((Ni, 1))
+    ml[0] = np.mean(signal)
+    vl[0] = np.var(signal)
+    i = 0
+    NumberOfEvents = 0
+    while i < (Ni - 2):
+        i += 1
+        # local mean low pass filtering
+        ml[i] = coeff['a'] * ml[i - 1] + (1 - coeff['a']) * signal[i]
+        vl[i] = coeff['a'] * vl[i - 1] + (1 - coeff['a']) * (signal[i] - ml[i])**2
+        Sl = ml[i] - coeff['S'] * np.sqrt(vl[i])
+        if signal[i + 1] <= Sl:
+            NumberOfEvents += 1
+            start = 1 + i
+            El = ml[i] - coeff['E'] * np.sqrt(vl[i])
+            Mm = ml[i]
+            Vv = vl[i]
+            duration = 0
+            while signal[i + 1] < El and i < (Ni - 2) and duration < coeff['eventlengthLimit']:
+                duration += 1
+                i += 1
+            if duration >= coeff['eventlengthLimit'] or i > (Ni - 10):
+                NumberOfEvents -= 1
+            else:
+                k = start
+                while signal[k] < Mm and k > 1:
+                    k -= 1
+                start = k - 1
+                k2 = i + 1
+                while signal[k2] > Mm:
+                    k2 -= 1
+                endp = k2 + 1
+
+                RoughEventLocations.append((start,endp,Mm, Vv))
+                ml[i] = Mm
+                vl[i] = Vv
+    return np.array(RoughEventLocations)
+
+def RecursiveLowPassFast(signal, coeff):
+    ml = scipy.signal.lfilter([1 - coeff['a'], 0], [1, -coeff['a']], signal)
+    vl = scipy.signal.lfilter([1 - coeff['a'], 0], [1, -coeff['a']], np.square(signal - ml))
+    sl = ml - coeff['S'] * np.sqrt(vl)
+    Ni = len(signal)
+    points = np.array(np.where(signal<=sl)[0])
+    to_pop=np.array([])
+    for i in range(1,len(points)):
+        if points[i] - points[i - 1] == 1:
+            to_pop=np.append(to_pop, i)
+    points = np.delete(points, to_pop)
+    RoughEventLocations = []
+    NumberOfEvents=0
+
+    for i in points:
+        if NumberOfEvents is not 0:
+            if i >= RoughEventLocations[NumberOfEvents-1][0] and i <= RoughEventLocations[NumberOfEvents-1][1]:
+                continue
+        NumberOfEvents += 1
+        start = i
+        El = ml[i] - coeff['E'] * np.sqrt(vl[i])
+        Mm = ml[i]
+        Vv = vl[i]
+        duration = 0
+        while signal[i + 1] < El and i < (Ni - 2) and duration < coeff['eventlengthLimit']:
+            duration += 1
+            i += 1
+        if duration >= coeff['eventlengthLimit'] or i > (Ni - 10):
+            NumberOfEvents -= 1
+        else:
+            k = start
+            while signal[k] < Mm and k > 1:
+                k -= 1
+            start = k - 1
+            k2 = i + 1
+            while signal[k2] > Mm:
+                k2 -= 1
+            endp = k2
+            RoughEventLocations.append((start, endp, ml[start], vl[start]))
+
+    return np.array(RoughEventLocations)
+
+def RecursiveLowPassFastUp(signal, coeff):
+    ml = scipy.signal.lfilter([1 - coeff['a'], 0], [1, -coeff['a']], signal)
+    vl = scipy.signal.lfilter([1 - coeff['a'], 0], [1, -coeff['a']], np.square(signal - ml))
+    sl = ml + coeff['S'] * np.sqrt(vl)
+    Ni = len(signal)
+    points = np.array(np.where(signal>=sl)[0])
+    to_pop=np.array([])
+    for i in range(1,len(points)):
+        if points[i] - points[i - 1] == 1:
+            to_pop=np.append(to_pop, i)
+    points = np.delete(points, to_pop)
+
+    points =np.delete(points, np.array(np.where(points == 0)[0]))
+
+    RoughEventLocations = []
+    NumberOfEvents=0
+    for i in points:
+        if NumberOfEvents is not 0:
+            if i >= RoughEventLocations[NumberOfEvents-1][0] and i <= RoughEventLocations[NumberOfEvents-1][1]:
+                continue
+        NumberOfEvents += 1
+        start = i
+        El = ml[i] + coeff['E'] * np.sqrt(vl[i])
+        Mm = ml[i]
+        duration = 0
+        while signal[i + 1] > El and i < (Ni - 2) and duration < coeff['eventlengthLimit']:
+            duration += 1
+            i += 1
+        if duration >= coeff['eventlengthLimit'] or i > (Ni - 10):
+            NumberOfEvents -= 1
+        else:
+            k = start
+            while signal[k] > Mm and k > 2:
+                k -= 1
+            start = k - 1
+            k2 = i + 1
+            while signal[k2] > Mm:
+                k2 -= 1
+            endp = k2
+            RoughEventLocations.append((start, endp, ml[start], vl[start]))
+
+    return np.array(RoughEventLocations)
+
+def AddInfoAfterRecursive(self):
+    startpoints = np.uint64(self.AnalysisResults[self.sig]['RoughEventLocations'][:, 0])
+    endpoints = np.uint64(self.AnalysisResults[self.sig]['RoughEventLocations'][:, 1])
+    localBaseline = self.AnalysisResults[self.sig]['RoughEventLocations'][:, 2]
+    localVariance = self.AnalysisResults[self.sig]['RoughEventLocations'][:, 3]
+
+    numberofevents = len(startpoints)
+
+    self.AnalysisResults[self.sig]['StartPoints'] = startpoints
+    self.AnalysisResults[self.sig]['EndPoints'] = endpoints
+    self.AnalysisResults[self.sig]['LocalBaseline'] = localBaseline
+    self.AnalysisResults[self.sig]['LocalVariance'] = localVariance
+    self.AnalysisResults[self.sig]['NumberOfEvents'] = len(startpoints)
+
+    #### Now we want to move the endpoints to be the last minimum for each ####
+    #### event so we find all minimas for each event, and set endpoint to last ####
+
+    deli = np.zeros(numberofevents)
+    dwell = np.zeros(numberofevents)
+
+    for i in range(numberofevents):
+        mins = np.array(signal.argrelmin(self.out[self.sig][startpoints[i]:endpoints[i]])[0] + startpoints[i],
+                        dtype=np.uint64)
+        print(mins)
+        mins = mins[self.out[self.sig][mins] < localBaseline[i] - 4 * localVariance[i]]
+        if len(mins) == 1:
+            pass
+            deli[i] = localBaseline[i] - min(self.out[self.sig][startpoints[i]:endpoints[i]])
+            dwell[i] = (endpoints[i] - startpoints[i]) / self.out['samplerate']
+            endpoints[i] = mins[0]
+        elif len(mins) > 1:
+            deli[i] = localBaseline[i] - np.min(self.out[self.sig][mins[0]:mins[-1]])
+            endpoints[i] = mins[-1]
+            dwell[i] = (endpoints[i] - startpoints[i]) / self.out['samplerate']
+
+            # startpoints = startpoints[deli != 0]
+            # endpoints = endpoints[deli != 0]
+            # deli = deli[deli != 0]
+            # dwell = dwell[deli != 0]
+            # localBaseline = localBaseline[deli != 0]
+
+    frac = deli / localBaseline
+    dt = np.array(0)
+    dt = np.append(dt, np.diff(startpoints) / self.out['samplerate'])
+    numberofevents = len(dt)
+
+    self.AnalysisResults[self.sig]['FractionalCurrentDrop'] = frac
+    self.AnalysisResults[self.sig]['DeltaI'] = deli
+    self.AnalysisResults[self.sig]['DwellTime'] = dwell
+    self.AnalysisResults[self.sig]['Frequency'] = dt
+
+def SavingAndPlottingAfterRecursive(self):
+
+    startpoints=self.AnalysisResults[self.sig]['StartPoints']
+    endpoints=self.AnalysisResults[self.sig]['EndPoints']
+    numberofevents=self.AnalysisResults[self.sig]['NumberOfEvents']
+    deli=self.AnalysisResults[self.sig]['DeltaI']
+    dwell=self.AnalysisResults[self.sig]['DwellTime']
+    frac=self.AnalysisResults[self.sig]['FractionalCurrentDrop']
+    dt=self.AnalysisResults[self.sig]['Frequency']
+    localBaseline=self.AnalysisResults[self.sig]['LocalBaseline']
+
+    self.p1.clear()
+    # Event detection plot, Main Window
+    self.p1.plot(self.t, self.out[self.sig], pen='b')
+    self.p1.plot(self.t[startpoints],  self.out[self.sig][startpoints], pen=None, symbol='o', symbolBrush='g', symbolSize=10)
+    self.p1.plot(self.t[endpoints],  self.out[self.sig][endpoints], pen=None, symbol='o', symbolBrush='r', symbolSize=10)
+    #self.p1.plot(self.t[startpoints-10], localBaseline, pen=None, symbol='x', symbolBrush='y', symbolSize=10)
+
+    self.ui.eventcounterlabel.setText('Events:' + str(numberofevents))
+    self.ui.meandelilabel.setText('Mean Current Drop: ' + pg.siFormat(np.mean(deli), precision=5, suffix='A', space=True, error=None, minVal=1e-25, allowUnicode=True))
+    self.ui.meandwelllabel.setText('Dwell: ' + pg.siFormat(np.median(dwell), precision=5, suffix='s', space=True, error=None, minVal=1e-25, allowUnicode=True))
+    self.ui.meandtlabel.setText('Rate: ' + pg.siFormat(numberofevents / self.t[-1], precision=5, suffix='1/s', space=True, error=None, minVal=1e-25, allowUnicode=True))
+
+    try:
+        self.p2.data = self.p2.data[np.where(np.array(self.sdf.fn) != self.matfilename)]
+    except:
+        IndexError
+    self.sdf = self.sdf[self.sdf.fn != self.matfilename]
+
+    fn = pd.Series([self.matfilename, ] * numberofevents)
+    color = pd.Series([self.cb.color(), ] * numberofevents)
+
+    self.sdf = self.sdf.append(pd.DataFrame({'fn': fn, 'color': color, 'deli': deli,
+                                             'frac': frac, 'dwell': dwell,
+                                             'dt': dt, 'startpoints': startpoints,
+                                             'endpoints': endpoints, 'baseline': localBaseline}), ignore_index=True)
+
+    self.p2.addPoints(x=np.log10(dwell), y=frac,
+                      symbol='o', brush=(self.cb.color()), pen=None, size=10)
+
+    self.w1.addItem(self.p2)
+    self.w1.setLogMode(x=True, y=False)
+    self.p1.autoRange()
+    self.w1.autoRange()
+    self.ui.scatterplot.update()
+    self.w1.setRange(yRange=[0, 1])
+
+    colors = self.sdf.color
+    for i, x in enumerate(colors):
+        fracy, fracx = np.histogram(self.sdf.frac[self.sdf.color == x],
+                                    bins=np.linspace(0, 1, int(self.ui.fracbins.text())))
+        deliy, delix = np.histogram(self.sdf.deli[self.sdf.color == x],
+                                    bins=np.linspace(float(self.ui.delirange0.text()) * 10 ** -9,
+                                                     float(self.ui.delirange1.text()) * 10 ** -9,
+                                                     int(self.ui.delibins.text())))
+        bins_dwell=np.linspace(float(self.ui.dwellrange0.text()), float(self.ui.dwellrange1.text()), int(self.ui.dwellbins.text()))
+        dwelly, dwellx = np.histogram(np.log10(self.sdf.dwell[self.sdf.color == x]),
+                                      bins=bins_dwell,range=(bins_dwell.min(),bins_dwell.max()))
+        dty, dtx = np.histogram(self.sdf.dt[self.sdf.color == x],
+                                bins=np.linspace(float(self.ui.dtrange0.text()), float(self.ui.dtrange1.text()),
+                                                 int(self.ui.dtbins.text())))
+
+        #            hist = pg.PlotCurveItem(fracy, fracx , stepMode = True, fillLevel=0, brush = x, pen = 'k')
+        #            self.w2.addItem(hist)
+
+        hist = pg.BarGraphItem(height=fracy, x0=fracx[:-1], x1=fracx[1:], brush=x)
+        self.w2.addItem(hist)
+
+        #            hist = pg.PlotCurveItem(delix, deliy , stepMode = True, fillLevel=0, brush = x, pen = 'k')
+        #            self.w3.addItem(hist)
+
+        hist = pg.BarGraphItem(height=deliy, x0=delix[:-1], x1=delix[1:], brush=x)
+        self.w3.addItem(hist)
+        #            self.w3.autoRange()
+        self.w3.setRange(
+            xRange=[float(self.ui.delirange0.text()) * 10 ** -9, float(self.ui.delirange1.text()) * 10 ** -9])
+
+        #            hist = pg.PlotCurveItem(dwellx, dwelly , stepMode = True, fillLevel=0, brush = x, pen = 'k')
+        #            self.w4.addItem(hist)
+
+        hist = pg.BarGraphItem(height=dwelly, x0=dwellx[:-1], x1=dwellx[1:], brush=x)
+        self.w4.addItem(hist)
+
+        #            hist = pg.PlotCurveItem(dtx, dty , stepMode = True, fillLevel=0, brush = x, pen = 'k')
+        #            self.w5.addItem(hist)
+
+        hist = pg.BarGraphItem(height=dty, x0=dtx[:-1], x1=dtx[1:], brush=x)
+        self.w5.addItem(hist)
+
+def save(self):
+    np.savetxt(self.matfilename + 'DB.txt', np.column_stack((self.deli, self.frac, self.dwell, self.dt)),
+               delimiter='\t')
+
+def PlotEventSingle(self, clicked=[]):
+    startpoints=self.AnalysisResults[self.sig]['StartPoints']
+    endpoints=self.AnalysisResults[self.sig]['EndPoints']
+    deli=self.AnalysisResults[self.sig]['DeltaI']
+    dwell=self.AnalysisResults[self.sig]['DwellTime']
+    localBaseline=self.AnalysisResults[self.sig]['LocalBaseline']
+    # Reset plot
+    self.p3.setLabel('bottom', text='Time', units='s')
+    self.p3.setLabel('left', text='Current', units='A')
+    self.p3.clear()
+
+    # Correct for user error if non-extistent number is entered
+    eventbuffer = np.int(self.ui.eventbufferentry.value())
+    firstindex = self.sdf.fn[self.sdf.fn == self.matfilename].index[0]
+    if clicked == []:
+        eventnumber = np.int(self.ui.eventnumberentry.text())
+    else:
+        eventnumber = clicked - firstindex
+        self.ui.eventnumberentry.setText(str(eventnumber))
+    if eventnumber >= self.numberofevents:
+        eventnumber = self.numberofevents - 1
+        self.ui.eventnumberentry.setText(str(eventnumber))
+
+    # plot event trace
+    self.p3.plot(self.t[startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
+                 self.out[self.sig][startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
+                 pen='b')
+
+    # plot event fit
+    self.p3.plot(self.t[startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer], np.concatenate((
+        np.repeat(np.array([localBaseline[eventnumber]]), eventbuffer),
+        np.repeat(np.array([localBaseline[eventnumber] - self.deli[eventnumber
+        ]]), endpoints[eventnumber] - startpoints[eventnumber]),
+        np.repeat(np.array([localBaseline[eventnumber]]), eventbuffer)), 0),
+                 pen=pg.mkPen(color=(173, 27, 183), width=3))
+
+    # plot 2nd Channel
+    self.p3.plot(self.t[startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
+                 self.out[self.sig2][startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
+                 pen='r')
+
+    self.p3.autoRange()
+    # Mark event that is being viewed on scatter plot
+
+    colors = np.array(self.sdf.color)
+    for i in range(len(colors)):
+        colors[i] = pg.Color(colors[i])
+    colors[firstindex + eventnumber] = pg.mkColor('r')
+
+    self.p2.setBrush(colors, mask=None)
+
+    # Mark event start and end points
+    self.p3.plot([self.t[startpoints[eventnumber]], self.t[startpoints[eventnumber]]],
+                 [self.out[self.sig][startpoints[eventnumber]], self.out[self.sig][startpoints[eventnumber]]], pen=None,
+                 symbol='o', symbolBrush='g', symbolSize=12)
+    self.p3.plot([self.t[endpoints[eventnumber]], self.t[endpoints[eventnumber]]],
+                 [self.out[self.sig][endpoints[eventnumber]], self.out[self.sig][endpoints[eventnumber]]], pen=None,
+                 symbol='o', symbolBrush='r', symbolSize=12)
+
+    dtime = pg.siFormat(dwell[eventnumber], precision=5, suffix='s', space=True, error=None, minVal=1e-25,
+                        allowUnicode=True)
+    dI = pg.siFormat(deli[eventnumber], precision=5, suffix='A', space=True, error=None, minVal=1e-25,
+                     allowUnicode=True)
+    self.ui.eventinfolabel.setText('Dwell Time=' + dtime + ',   Deli=' + dI)
+
+def PlotEventDouble(self, clicked=[]):
+    startpoints = self.AnalysisResults[self.sig]['StartPoints']
+    endpoints = self.AnalysisResults[self.sig]['EndPoints']
+    deli = self.AnalysisResults[self.sig]['DeltaI']
+    localBaseline = self.AnalysisResults[self.sig]['LocalBaseline']
+    dwell = self.AnalysisResults[self.sig]['DwellTime']
+
+    self.p3.clear()
+    self.transverseAxisEvent.clear()
+
+    if self.sig=='i1':
+        leftlabel="Ionic Current"
+        rightlabel="Transverse Current"
+    else:
+        rightlabel="Ionic Current"
+        leftlabel="Transverse Current"
+    p1 = self.p3.plotItem
+    p1.getAxis('left').setLabel(text=leftlabel, color='#0000FF', units='A')
+    ## create a new ViewBox, link the right axis to its coordinate system
+    p1.showAxis('right')
+    p1.scene().addItem(self.transverseAxisEvent)
+    p1.getAxis('right').linkToView(self.transverseAxisEvent)
+    self.transverseAxisEvent.setXLink(p1)
+    self.transverseAxisEvent.show()
+    p1.getAxis('right').setLabel(text=rightlabel, color='#FF0000', units='A')
+
+    def updateViews():
+        ## view has resized; update auxiliary views to match
+        self.transverseAxisEvent.setGeometry(p1.vb.sceneBoundingRect())
+        self.transverseAxisEvent.linkedViewChanged(p1.vb, self.transverseAxisEvent.XAxis)
 
     updateViews()
     p1.vb.sigResized.connect(updateViews)
 
-    p1.plot(time, i1, pen='b')
-    p2.addItem(pg.PlotCurveItem(time, i2, pen='r'))
-    return pw
+    #p1.plot(self.t, self.out['i1'], pen='b')
+    #self.transverseAxisEvent.addItem(pg.PlotCurveItem(self.t, self.out['i2'], pen='r'))
+
+    # Correct for user error if non-extistent number is entered
+    eventbuffer = np.int(self.ui.eventbufferentry.value())
+    firstindex = self.sdf.fn[self.sdf.fn == self.matfilename].index[0]
+    if clicked == []:
+        eventnumber = np.int(self.ui.eventnumberentry.text())
+    else:
+        eventnumber = clicked - firstindex
+        self.ui.eventnumberentry.setText(str(eventnumber))
+    if eventnumber >= self.AnalysisResults[self.sig]['NumberOfEvents']:
+        eventnumber = self.AnalysisResults[self.sig]['NumberOfEvents'] - 1
+        self.ui.eventnumberentry.setText(str(eventnumber))
+
+    # plot event trace
+
+    parttoplot=np.arange(startpoints[eventnumber] - eventbuffer, endpoints[eventnumber] + eventbuffer,1, dtype=np.uint64)
+    p1.plot(self.t[parttoplot], self.out[self.sig][parttoplot],pen='b')
+
+    # plot event fit
+    p1.plot(self.t[parttoplot],
+                 np.concatenate((
+                     np.repeat(np.array([localBaseline[eventnumber]]), eventbuffer),
+                     np.repeat(np.array([localBaseline[eventnumber] - deli[eventnumber
+                     ]]), endpoints[eventnumber] - startpoints[eventnumber]),
+                     np.repeat(np.array([localBaseline[eventnumber]]), eventbuffer)), 0),
+                 pen=pg.mkPen(color=(173, 27, 183), width=3))
+
+    # plot 2nd Channel
+    self.transverseAxisEvent.addItem(pg.PlotCurveItem(self.t[parttoplot],
+                 self.out[self.sig2][parttoplot],
+                 pen='r'))
+
+    min1 = np.min(self.out[self.sig][parttoplot])
+    max1 = np.max(self.out[self.sig][parttoplot])
+    self.p3.setYRange(min1-(max1-min1), max1)
+    self.p3.enableAutoRange(axis='x')
+    min2 = np.min(self.out[self.sig2][parttoplot])
+    max2 = np.max(self.out[self.sig2][parttoplot])
+    self.transverseAxisEvent.setYRange(min2, max2+(max2-min2))
+
+    # Mark event that is being viewed on scatter plot
+
+    colors = np.array(self.sdf.color)
+    for i in range(len(colors)):
+        colors[i] = pg.Color(colors[i])
+    colors[firstindex + eventnumber] = pg.mkColor('r')
+
+    self.p2.setBrush(colors, mask=None)
+
+    # Mark event start and end points
+    p1.plot([self.t[startpoints[eventnumber]], self.t[startpoints[eventnumber]]],
+                 [self.out[self.sig][startpoints[eventnumber]], self.out[self.sig][startpoints[eventnumber]]],
+                 pen=None,
+                 symbol='o', symbolBrush='g', symbolSize=12)
+    p1.plot([self.t[endpoints[eventnumber]], self.t[endpoints[eventnumber]]],
+                 [self.out[self.sig][endpoints[eventnumber]], self.out[self.sig][endpoints[eventnumber]]],
+                 pen=None,
+                 symbol='o', symbolBrush='r', symbolSize=12)
+
+    dtime=pg.siFormat(dwell[eventnumber], precision=5, suffix='s', space=True, error=None, minVal=1e-25, allowUnicode=True)
+    dI=pg.siFormat(deli[eventnumber], precision=5, suffix='A', space=True, error=None, minVal=1e-25, allowUnicode=True)
+    self.ui.eventinfolabel.setText('Dwell Time=' + dtime + ',   Deli=' + dI)
+
+def PlotEventDoubleFit(self, clicked=[]):
+    f = h5py.File(self.matfilename + '_OriginalDB.hdf5', "r")
+    i1_indexes=f['LowPassSegmentation/i1/CommonIndex']
+    i2_indexes=f['LowPassSegmentation/i2/CommonIndex']
+    i1=f['LowPassSegmentation/i1/']
+    i2=f['LowPassSegmentation/i2/']
+
+    self.p3.clear()
+    self.transverseAxisEvent.clear()
+
+    leftlabel="Ionic Current"
+    rightlabel="Transverse Current"
+
+    p1 = self.p3.plotItem
+    p1.getAxis('left').setLabel(text=leftlabel, color='#0000FF', units='A')
+    ## create a new ViewBox, link the right axis to its coordinate system
+    p1.showAxis('right')
+    p1.scene().addItem(self.transverseAxisEvent)
+    p1.getAxis('right').linkToView(self.transverseAxisEvent)
+    self.transverseAxisEvent.setXLink(p1)
+    self.transverseAxisEvent.show()
+    p1.getAxis('right').setLabel(text=rightlabel, color='#FF0000', units='A')
+
+    def updateViews():
+        ## view has resized; update auxiliary views to match
+        self.transverseAxisEvent.setGeometry(p1.vb.sceneBoundingRect())
+        self.transverseAxisEvent.linkedViewChanged(p1.vb, self.transverseAxisEvent.XAxis)
+
+    updateViews()
+    p1.vb.sigResized.connect(updateViews)
+
+    # Correct for user error if non-extistent number is entered
+    eventbuffer = np.int(self.ui.eventbufferentry.value())
+    maxEvents=len(i1_indexes)
+
+    eventnumber = np.int(self.ui.eventnumberentry.text())
+    if eventnumber >= maxEvents:
+        eventnumber=0
+        self.ui.eventnumberentry.setText(str(eventnumber))
+    elif eventnumber < 0:
+        eventnumber=maxEvents
+        self.ui.eventnumberentry.setText(str(eventnumber))
+
+    # plot event trace
+    parttoplot=np.arange(i1['StartPoints'][i1_indexes[eventnumber]] - eventbuffer, i1['EndPoints'][i1_indexes[eventnumber]] + eventbuffer,1, dtype=np.uint64)
+    parttoplot2=np.arange(i2['StartPoints'][i2_indexes[eventnumber]] - eventbuffer, i2['EndPoints'][i2_indexes[eventnumber]] + eventbuffer,1, dtype=np.uint64)
+
+    p1.plot(self.t[parttoplot], self.out['i1'][parttoplot], pen='b')
+
+    # plot event fit
+    p1.plot(self.t[parttoplot],
+                 np.concatenate((
+                     np.repeat(np.array([i1['LocalBaseline'][i1_indexes[eventnumber]]]), eventbuffer),
+                     np.repeat(np.array([i1['LocalBaseline'][i1_indexes[eventnumber]] - i1['DeltaI'][i1_indexes[eventnumber]
+                     ]]), i1['EndPoints'][i1_indexes[eventnumber]] - i1['StartPoints'][i1_indexes[eventnumber]]),
+                     np.repeat(np.array([i1['LocalBaseline'][i1_indexes[eventnumber]]]), eventbuffer)), 0),
+                 pen=pg.mkPen(color=(173, 27, 183), width=3))
+
+    # plot 2nd Channel
+    self.transverseAxisEvent.addItem(pg.PlotCurveItem(self.t[parttoplot2], self.out['i2'][parttoplot2], pen='r'))
+    self.transverseAxisEvent.addItem(pg.PlotCurveItem(self.t[parttoplot2], np.concatenate((np.repeat(
+        np.array([i2['LocalBaseline'][i2_indexes[eventnumber]]]), eventbuffer), np.repeat(
+        np.array([i2['LocalBaseline'][i2_indexes[eventnumber]] - i2['DeltaI'][i2_indexes[eventnumber]]]),
+        i2['EndPoints'][i2_indexes[eventnumber]] - i2['StartPoints'][i2_indexes[eventnumber]]), np.repeat(
+        np.array([i2['LocalBaseline'][i2_indexes[eventnumber]]]), eventbuffer)), 0), pen=pg.mkPen(color=(173, 27, 183), width=3)))
+
+    min1 = np.min(self.out['i1'][parttoplot])
+    max1 = np.max(self.out['i1'][parttoplot])
+    self.p3.setYRange(min1-(max1-min1), max1)
+    self.p3.enableAutoRange(axis='x')
+    min2 = np.min(self.out['i2'][parttoplot2])
+    max2 = np.max(self.out['i2'][parttoplot2])
+    self.transverseAxisEvent.setYRange(min2, max2+(max2-min2))
+
+    # Mark event start and end points
+    p1.plot([self.t[i1['StartPoints'][i1_indexes[eventnumber]]], self.t[i1['StartPoints'][i1_indexes[eventnumber]]]],
+                 [self.out['i1'][i1['StartPoints'][i1_indexes[eventnumber]]], self.out['i1'][i1['StartPoints'][i1_indexes[eventnumber]]]],
+                 pen=None,
+                 symbol='o', symbolBrush='g', symbolSize=12)
+    p1.plot([self.t[i1['EndPoints'][i1_indexes[eventnumber]]], self.t[i1['EndPoints'][i1_indexes[eventnumber]]]],
+                 [self.out['i1'][i1['EndPoints'][i1_indexes[eventnumber]]], self.out['i1'][i1['EndPoints'][i1_indexes[eventnumber]]]],
+                 pen=None,
+                 symbol='o', symbolBrush='r', symbolSize=12)
+
+    self.transverseAxisEvent.addItem(pg.PlotCurveItem([self.t[i2['StartPoints'][i2_indexes[eventnumber]]], self.t[i2['StartPoints'][i2_indexes[eventnumber]]]],
+                 [self.out['i2'][i2['StartPoints'][i2_indexes[eventnumber]]], self.out['i2'][i1['StartPoints'][i2_indexes[eventnumber]]]],
+                 pen=None,
+                 symbol='o', symbolBrush='g', symbolSize=12))
+    self.transverseAxisEvent.addItem(pg.PlotCurveItem([self.t[i2['EndPoints'][i2_indexes[eventnumber]]], self.t[i2['EndPoints'][i2_indexes[eventnumber]]]],
+                 [self.out['i2'][i1['EndPoints'][i2_indexes[eventnumber]]], self.out['i2'][i1['EndPoints'][i2_indexes[eventnumber]]]],
+                 pen=None,
+                 symbol='o', symbolBrush='r', symbolSize=12))
+
+
+    dtime=pg.siFormat(i1['DwellTime'][i1_indexes[eventnumber]], precision=5, suffix='s', space=True, error=None, minVal=1e-25, allowUnicode=True)
+    dI=pg.siFormat(i1['DwellTime'][i1_indexes[eventnumber]], precision=5, suffix='A', space=True, error=None, minVal=1e-25, allowUnicode=True)
+    dtime2=pg.siFormat(i2['DwellTime'][i2_indexes[eventnumber]], precision=5, suffix='s', space=True, error=None, minVal=1e-25, allowUnicode=True)
+    dI2=pg.siFormat(i2['DwellTime'][i2_indexes[eventnumber]], precision=5, suffix='A', space=True, error=None, minVal=1e-25, allowUnicode=True)
+
+    self.ui.eventinfolabel.setText('Ionic Dwell Time=' + dtime + ',   Ionic Deli=' + dI + '\n' 'Trans Dwell Time=' + dtime2 + ',   Trans Deli=' + dI2)
+
+def SaveEventPlotMatplot(self):
+    eventbuffer = np.int(self.ui.eventbufferentry.value())
+    eventnumber = np.int(self.ui.eventnumberentry.text())
+
+    parttoplot = np.arange(startpoints[eventnumber] - eventbuffer, endpoints[eventnumber] + eventbuffer, 1,
+                           dtype=np.uint64)
+
+    t=np.arange(0,len(parttoplot))
+    t=t/self.out['samplerate']*1e3
+
+    fig1=plt.figure(1, figsize=(20,7))
+    plt.subplot(2, 1, 1)
+    plt.cla
+    plt.plot(t, self.out['i1'][parttoplot]*1e9, 'b')
+    plt.ylabel('Ionic Current [nA]')
+    ax = plt.gca()
+    ax.set_xticklabels([])
+
+    plt.subplot(2, 1, 2)
+    plt.cla
+    plt.plot(t, self.out['i2'][parttoplot]*1e9, 'r')
+    plt.ylabel('Transverse Current [nA]')
+    plt.xlabel('time (ms)')
+    self.pp.savefig()
+    fig1.clear()
+
+def CombineTheTwoChannels(file):
+    f = h5py.File(file, 'a')
+
+    i1 = f['LowPassSegmentation/i1/']
+    i2 = f['LowPassSegmentation/i2/']
+
+    # Common Events
+    # Take Longer
+    CommonEventsi1Index = np.array([], dtype=np.uint64)
+    CommonEventsi2Index = np.array([], dtype=np.uint64)
+    DelayLimit = 100
+
+    for i in range(len(i1['StartPoints'])):
+        for j in range(len(i2['StartPoints'])):
+            if np.absolute(i1['StartPoints'][i] - i2['StartPoints'][j]) < DelayLimit:
+                CommonEventsi1Index = np.append(CommonEventsi1Index, i)
+                CommonEventsi2Index = np.append(CommonEventsi2Index, j)
+    # Only i1
+    Onlyi1Indexes = np.delete(range(len(i1['StartPoints'])), CommonEventsi1Index)
+    # Only i2
+    Onlyi2Indexes = np.delete(range(len(i2['StartPoints'])), CommonEventsi2Index)
+
+    e = "CommonIndex" in i1
+    if e:
+        del i1['CommonIndex']
+        i1.create_dataset('CommonIndex', data=CommonEventsi1Index)
+        del i2['CommonIndex']
+        i2.create_dataset('CommonIndex', data=CommonEventsi2Index)
+        del i1['OnlyIndex']
+        i1.create_dataset('OnlyIndex', data=Onlyi1Indexes)
+        del i2['OnlyIndex']
+        i2.create_dataset('OnlyIndex', data=Onlyi2Indexes)
+    else:
+        i1.create_dataset('CommonIndex', data=CommonEventsi1Index)
+        i2.create_dataset('CommonIndex', data=CommonEventsi2Index)
+        i1.create_dataset('OnlyIndex', data=Onlyi1Indexes)
+        i2.create_dataset('OnlyIndex', data=Onlyi2Indexes)
+
+def PlotEvent(t1, t2, i1, i2, fit1, fit2):
+    fig1 = plt.figure(1, figsize=(20, 7))
+    ax1 = fig1.add_subplot(211)
+    ax2 = fig1.add_subplot(212, sharex=ax1)
+    ax1.plot(t1, i1, 'b')
+    ax1.plot(t1, fit1, 'y')
+    ax2.plot(t2, i2, 'r')
+    ax2.plot(t2, fit2, 'y')
+    ax1.set_ylabel('Ionic Current [nA]')
+    ax1.set_xticklabels([])
+    ax2.set_ylabel('Transverse Current [nA]')
+    ax2.set_xlabel('Time [us]')
+    return fig1

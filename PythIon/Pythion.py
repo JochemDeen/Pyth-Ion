@@ -21,6 +21,10 @@ from batchinfo import *
 import UsefulFunctions as uf
 import scipy
 import matplotlib
+from matplotlib.backends.backend_pdf import PdfPages
+import time
+import h5py
+
 
 class GUIForm(QtGui.QMainWindow):
 
@@ -54,7 +58,7 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.savefitsbutton.clicked.connect(self.saveeventfits)
         self.ui.fitbutton.clicked.connect(self.CUSUM)
         self.ui.Poresizeraction.triggered.connect(self.sizethepore)
-        self.ui.ndChannel.clicked.connect(self.Channel2Button)
+        self.ui.ndChannel.clicked.connect(self.Plot)
         self.ui.makeIVButton.clicked.connect(self.makeIV)
         self.ui.actionSave_All.triggered.connect(self.SaveAllFigures)
         self.ui.groupBox_5.clicked.connect(self.customCond)
@@ -65,9 +69,10 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.porelengthValue.valueChanged.connect(self.UpdateIV)
         self.ui.actionUse_Clipping.triggered.connect(self.DisplaySettings)
         self.ui.actionUse_Downsampling.triggered.connect(self.DisplaySettings)
+        self.ui.actionSave_IV_Data.triggered.connect(self.SaveIVData)
         self.ui.actionUse_Clipping.setChecked(False)
         #        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
-        self.ui.plotBoth.clicked.connect(self.plotBothClicked)
+        self.ui.plotBoth.clicked.connect(self.Plot)
         ###### Setting up plotting elements and their respective options######
         self.ui.signalplot.setBackground('w')
         self.ui.scatterplot.setBackground('w')
@@ -85,19 +90,22 @@ class GUIForm(QtGui.QMainWindow):
 
         self.ui.label_2.setText('Output Samplerate (kHz)' + str(pg.siScale(np.float(self.ui.outputsamplerateentry.text()))[1]))
         self.p1 = self.ui.signalplot
-        # self.p1.setLabel('bottom', text='Time', units='s')
-        # self.p1.setLabel('left', text='Current', units='A')
-        # self.p1.enableAutoRange(axis='y')
-        # self.p1.setDownsampling(ds=True, auto=True, mode='peak')
-        # self.p1.setClipToView(False)
+        self.transverseAxis = pg.ViewBox()
+        self.transverseAxisVoltage = pg.ViewBox()
+        self.transverseAxisEvent = pg.ViewBox()
+
+
+        self.p1.enableAutoRange(axis='y')
+        self.p1.disableAutoRange(axis='x')
+        self.p1.setDownsampling(ds=False, auto=True, mode='subsample')
+        self.p1.setClipToView(False)
 
         self.voltagepl = self.ui.voltageplotwin
-        # self.voltagepl.setLabel('bottom', text='Time', units='s')
-        # self.voltagepl.setLabel('left', text='Voltage', units='V')
-        # self.voltagepl.enableAutoRange(axis='y')
-        # self.voltagepl.setDownsampling(ds=True, auto=True, mode='subsample')
-        # self.voltagepl.setClipToView(False)
-        # self.voltagepl.setXLink(self.p1)
+        self.voltagepl.enableAutoRange(axis='y')
+        self.voltagepl.disableAutoRange(axis='x')
+        self.voltagepl.setDownsampling(ds=True, auto=True, mode='subsample')
+        self.voltagepl.setClipToView(False)
+        self.voltagepl.setXLink(self.p1)
 
         self.ivplota = self.ui.ivplot
         #self.ivplot.setLabel('bottom', text='Current', units='A')
@@ -145,7 +153,7 @@ class GUIForm(QtGui.QMainWindow):
 #        self.w6.setLabel('bottom', text='Frequency (Hz)')
 #        self.w6.setLabel('left', text='PSD (pA^2/Hz)')
 
-        self.p3 = self.ui.eventplot.addPlot()
+        self.p3 = self.ui.eventplot
         self.p3.hideAxis('bottom')
         self.p3.hideAxis('left')
 
@@ -167,7 +175,14 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.customVoltage.setOpts(value=500e-3, suffix='V', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
         self.ui.customConductanceSpinBox.setOpts(value=10e-9/500e-3, suffix='S', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
 
+        self.ui.LP_a.setOpts(value=0.999, suffix='', siPrefix=False, dec=True, step=1e-3, minStep=1e-4)
+        self.ui.LP_S.setOpts(value=5, suffix='x STD', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+        self.ui.LP_E.setOpts(value=0, suffix='x STD', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+        self.ui.LP_eventlengthThresh.setOpts(value=1e-3, suffix='s', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+
         ####### Initializing various variables used for analysis##############
+        self.AnalysisResults = {}
+        self.sig = 'i1'
         self.xaxisIV=self.ui.IVxaxis.currentIndex()
         self.yaxisIV=self.ui.IVyaxis.currentIndex()
         self.Channel2=0
@@ -187,12 +202,16 @@ class GUIForm(QtGui.QMainWindow):
             'dwell','dt','startpoints','endpoints'])
 
     def Load(self, loadandplot = True):
+        if hasattr(self,'pp'):
+            if hasattr(self.pp,'close'):
+                self.pp.close()
         self.catdata=[]
         self.batchinfo = pd.DataFrame(columns = list(['cutstart', 'cutend']))
         self.p3.clear()
         self.p3.setLabel('bottom', text='Current', units='A', unitprefix = 'n')
         self.p3.setLabel('left', text='', units = 'Counts')
         self.p3.setAspectLocked(False)
+        self.p1.enableAutoRange(axis='x')
 
         colors = np.array(self.sdf.color)
         for i in range(len(colors)):
@@ -208,9 +227,6 @@ class GUIForm(QtGui.QMainWindow):
         self.totalplotpoints=len(self.p2.data)
         self.ui.eventnumberentry.setText(str(0))
         self.hasbaselinebeenset=0
-
-
-
         self.threshold=np.float64(self.ui.thresholdentry.text())*10**-9
         self.ui.filelabel.setText(self.datafilename)
         self.LPfiltercutoff = np.float64(self.ui.LPentry.text())*1000
@@ -220,14 +236,10 @@ class GUIForm(QtGui.QMainWindow):
             print('Loading Axopatch Data')
             self.out=uf.ImportAxopatchData(self.datafilename)
             self.matfilename = str(os.path.splitext(self.datafilename)[0])
-            self.data = self.out['i1']
-            self.vdata = self.out['v1']
             self.outputsamplerate=self.out['samplerate']
             self.ui.outputsamplerateentry.setText(str(self.out['samplerate']))
             if self.out['graphene']:
                 self.ui.AxopatchGroup.setVisible(1)
-                #self.p1.setLabel('left', text='Channel 1 Current', units='A')
-                #self.voltagepl.setLabel('left', text='Channel 1 Voltage', units='V')
             else:
                 self.ui.AxopatchGroup.setVisible(0)
 
@@ -332,59 +344,41 @@ class GUIForm(QtGui.QMainWindow):
                     self.p1.addItem(cmdtext)
                     cmdtext.setPos(cmdt,np.max(self.data))
 
-
-        self.t=np.arange(0,len(self.data))
+        self.t=np.arange(0, len(self.out['i1']))
         self.t=self.t/self.out['samplerate']
 
-        if self.hasbaselinebeenset==0:
-            self.baseline=np.median(self.data)
-            self.var=np.std(self.data)
-        self.ui.eventcounterlabel.setText('Baseline='+str(round(self.baseline*10**9,2))+' nA')
-
+        self.ui.label_2.setText('Output Samplerate ' + str(pg.siScale(np.float(self.outputsamplerate))[1]))
 
         if loadandplot == True:
             self.Plot()
 
+        #PDF to save images:
+        filename = os.path.splitext(os.path.basename(self.datafilename))[0]
+        dirname = os.path.dirname(self.datafilename)
+        self.count=1
+        while os.path.isfile(dirname + os.sep + filename + '_AllSavedImages_' + str(self.count) + '.pdf'):
+            self.count+=1
+        self.pp = PdfPages(dirname + os.sep + filename + '_AllSavedImages_' + str(self.count) + '.pdf')
+
     def Plot(self):
-        self.p1.clear()
-        # skips plotting first and last two points, there was a weird spike issue
-        #print('Time:'+ str(self.t.shape))
-        #self.p1.plot(self.t[2:][:-2], self.data[2:][:-2], pen='b')
+        # if self.hasbaselinebeenset==0:
+        #     self.baseline=np.median(self.out['i1'])
+        #     self.var=np.std(self.out['i1'])
+        # self.ui.eventcounterlabel.setText('Baseline='+str(round(self.baseline*10**9, 2))+' nA')
+
+        if not self.ui.plotBoth.isChecked():
+            if self.ui.ndChannel.isChecked():
+                self.sig = 'i2'
+                self.sig2 = 'i1'
+            else:
+                self.sig = 'i1'
+                self.sig2 = 'i2'
+        print(self.out[self.sig].shape)
+
         if self.ui.plotBoth.isChecked():
-            self.p1.plot(self.t, self.out['i1'], pen='b')
-            self.p1.plot(self.t, self.out['i2'], pen='r')
-
+            uf.DoublePlot(self)
         else:
-            self.p1.plot(self.t, self.data, pen='b')
-
-        #if str(os.path.splitext(self.datafilename)[1]) != '.abf':
-        #    self.p1.addLine(y=self.baseline, pen='g')
-        #    self
-
-        #self.p1.enableAutoScale()
-        #self.p1.disableAutoRange(axis=x)
-
-        self.p3.clear()
-        aphy, aphx = np.histogram(self.data, bins=np.round(len(self.data) / 1000))
-        aphx = aphx
-        #            aphhist = pg.BarGraphItem(height = aphy, x0 = aphx[:-1], x1 = aphx[1:], brush = 'b', pen = None)
-        aphhist = pg.PlotCurveItem(aphx, aphy, stepMode=True, fillLevel=0, brush='b')
-        self.p3.addItem(aphhist)
-
-        self.ui.label_2.setText('Output Samplerate ' + str(pg.siScale(np.float(self.outputsamplerate))[1]))
-        self.voltagepl.autoRange()
-        self.voltagepl.clear()
-        if self.out['type'] == 'ChimeraRaw':
-            self.voltagepl.addLine(y=self.out['voltage'], pen='b')
-        self.voltagepl.plot(self.t, self.vdata, pen='b')
-
-        self.psdplot.clear()
-        uf.MakePSD(self.data, self.outputsamplerate, self.psdplot)
-        siSamplerate = pg.siScale(self.outputsamplerate)
-        siSTD = pg.siScale(np.std(self.data))
-
-        self.ui.SampleRateLabel.setText('Samplerate: ' + str(self.outputsamplerate*siSamplerate[0]) + siSamplerate[1] + 'Hz')
-        self.ui.STDLabel.setText('STD: ' + str(siSTD[0]*np.std(self.data)) + siSTD[1] + 'A')
+            uf.PlotSingle(self)
 
     def getfile(self):
 
@@ -405,270 +399,33 @@ class GUIForm(QtGui.QMainWindow):
             #### if user cancels during file selection, exit loop#############
             return
 
+    def SaveIVData(self):
+        uf.ExportIVData(self)
+
     def analyze(self):
-        global startpoints,endpoints, mins
-        self.w2.clear()
-        self.w3.clear()
-        self.w4.clear()
-        self.w5.clear()
-
-        self.threshold = np.float64(self.ui.thresholdentry.text())*10**-9
-
-#### find all points below threshold ####
-
-        below = np.where(self.data < self.threshold)[0]
-
-#### locate the points where the current crosses the threshold ####
-
-        startandend = np.diff(below)
-        startpoints = np.insert(startandend, 0, 2)
-        endpoints = np.insert(startandend, -1, 2)
-        startpoints = np.where(startpoints>1)[0]
-        endpoints = np.where(endpoints>1)[0]
-        startpoints = below[startpoints]
-        endpoints = below[endpoints]
-
-#### Eliminate events that start before file or end after file ####
-
-        if startpoints[0] == 0:
-            startpoints = np.delete(startpoints,0)
-            endpoints = np.delete(endpoints,0)
-        if endpoints [-1] == len(self.data):
-            startpoints = np.delete(startpoints,-1)
-            endpoints = np.delete(endpoints,-1)
-
-#### Track points back up to baseline to find true start and end ####
-
-        numberofevents=len(startpoints)
-        highthresh = self.baseline - self.var
-
-        for j in range(numberofevents):
-            sp = startpoints[j] #mark initial guess for starting point
-            while self.data[sp] < highthresh and sp > 0:
-                sp = sp-1 # track back until we return to baseline
-            startpoints[j] = sp # mark true startpoint
-
-            ep = endpoints[j] #repeat process for end points
-            while self.data[ep] < highthresh:
-                ep = ep+1
-#                if j == numberofevents - 1: # if this is the last event, check to make
-                if ep == len(self.data) -1:  # sure that the current returns to baseline
-                    endpoints[j] = 0              # before file ends. If not, mark points for
-                    startpoints[j] = 0              # deletion and break from loop
-                    ep = 0
-                    break
-                else:
-                    try:
-                        if ep > startpoints[j+1]: # if we hit the next startpoint before we
-                            startpoints[j+1] = 0    # return to baseline, mark for deletion
-                            endpoints[j] = 0                  # and break out of loop
-                            ep = 0
-                            break
-                    except:
-                        IndexError
-            endpoints[j] = ep
-
-        startpoints = startpoints[startpoints!=0] # delete those events marked for
-        endpoints = endpoints[endpoints!=0]       # deletion earlier
-        self.numberofevents = len(startpoints)
-
-#### Now we want to move the endpoints to be the last minimum for each ####
-#### event so we find all minimas for each event, and set endpoint to last ####
-
-        self.deli = np.zeros(self.numberofevents)
-        self.dwell = np.zeros(self.numberofevents)
-
-        for i in range(self.numberofevents):
-            mins = np.array(signal.argrelmin(self.data[startpoints[i]:endpoints[i]])[0] + startpoints[i])
-            mins = mins[self.data[mins] < self.baseline - 4*self.var]
-            if len(mins) == 1:
-                pass
-                self.deli[i] = self.baseline - min(self.data[startpoints[i]:endpoints[i]])
-                self.dwell[i] = (endpoints[i]-startpoints[i])*1e6/self.outputsamplerate
-                endpoints[i] = mins[0]
-            elif len(mins) > 1:
-                self.deli[i] = self.baseline - np.mean(self.data[mins[0]:mins[-1]])
-                endpoints[i] = mins[-1]
-                self.dwell[i] = (endpoints[i]-startpoints[i])*1e6/self.outputsamplerate
-
-
-        startpoints = startpoints[self.deli!=0]
-        endpoints = endpoints[self.deli!=0]
-        self.deli = self.deli[self.deli!=0]
-        self.dwell = self.dwell[self.dwell!=0]
-        self.frac = self.deli/self.baseline
-        self.dt = np.array(0)
-        self.dt=np.append(self.dt,np.diff(startpoints)/self.outputsamplerate)
-        self.numberofevents = len(self.dt)
-
-        self.p1.clear()
-
-        #skips plotting first and last two points, there was a weird spike issue
-#        self.p1.plot(self.t[::10][2:][:-2],self.data[::10][2:][:-2],pen='b')
-        self.p1.plot(self.t[2:][:-2],self.data[2:][:-2],pen='b')
-        self.p1.plot(self.t[startpoints], self.data[startpoints],pen=None, symbol='o',symbolBrush='g',symbolSize=10)
-        self.p1.plot(self.t[endpoints], self.data[endpoints], pen=None, symbol='o',symbolBrush='r',symbolSize=10)
-
-        self.ui.eventcounterlabel.setText('Events:'+str(self.numberofevents))
-        self.ui.meandelilabel.setText('Deli:'+str(round(np.mean(self.deli*10**9),2))+' nA')
-        self.ui.meandwelllabel.setText('Dwell:'+str(round(np.median(self.dwell),2))+ u' μs')
-        self.ui.meandtlabel.setText('Rate:'+str(round(self.numberofevents/self.t[-1],1))+' events/s')
-
-        try:
-            self.p2.data = self.p2.data[np.where(np.array(self.sdf.fn) != self.matfilename)]
-        except:
-            IndexError
-        self.sdf = self.sdf[self.sdf.fn != self.matfilename]
-
-        fn = pd.Series([self.matfilename,] * self.numberofevents)
-        color = pd.Series([self.cb.color(),] * self.numberofevents)
-
-        self.sdf = self.sdf.append(pd.DataFrame({'fn':fn,'color':color,'deli':self.deli,
-                                    'frac':self.frac,'dwell':self.dwell,
-                                    'dt':self.dt,'startpoints':startpoints,
-                                    'endpoints':endpoints}), ignore_index=True)
-
-        self.p2.addPoints(x=np.log10(self.dwell),y=self.frac,
-        symbol='o', brush=(self.cb.color()), pen = None, size = 10)
-
-
-        self.w1.addItem(self.p2)
-        self.w1.setLogMode(x=True,y=False)
-        self.p1.autoRange()
-        self.w1.autoRange()
-        self.ui.scatterplot.update()
-        self.w1.setRange(yRange=[0,1])
-
-        colors = self.sdf.color
-        for i, x in enumerate(colors):
-            fracy, fracx = np.histogram(self.sdf.frac[self.sdf.color == x], bins=np.linspace(0, 1, int(self.ui.fracbins.text())))
-            deliy, delix = np.histogram(self.sdf.deli[self.sdf.color == x], bins=np.linspace(float(self.ui.delirange0.text())*10**-9, float(self.ui.delirange1.text())*10**-9, int(self.ui.delibins.text())))
-            dwelly, dwellx = np.histogram(np.log10(self.sdf.dwell[self.sdf.color == x]), bins=np.linspace(float(self.ui.dwellrange0.text()), float(self.ui.dwellrange1.text()), int(self.ui.dwellbins.text())))
-            dty, dtx = np.histogram(self.sdf.dt[self.sdf.color == x], bins=np.linspace(float(self.ui.dtrange0.text()), float(self.ui.dtrange1.text()), int(self.ui.dtbins.text())))
-
-#            hist = pg.PlotCurveItem(fracy, fracx , stepMode = True, fillLevel=0, brush = x, pen = 'k')
-#            self.w2.addItem(hist)
-
-            hist = pg.BarGraphItem(height = fracy, x0 = fracx[:-1], x1 = fracx[1:], brush = x)
-            self.w2.addItem(hist)
-
-#            hist = pg.PlotCurveItem(delix, deliy , stepMode = True, fillLevel=0, brush = x, pen = 'k')
-#            self.w3.addItem(hist)
-
-            hist = pg.BarGraphItem(height = deliy, x0 = delix[:-1], x1 = delix[1:], brush = x)
-            self.w3.addItem(hist)
-#            self.w3.autoRange()
-            self.w3.setRange(xRange = [float(self.ui.delirange0.text())*10**-9, float(self.ui.delirange1.text())*10**-9])
-
-#            hist = pg.PlotCurveItem(dwellx, dwelly , stepMode = True, fillLevel=0, brush = x, pen = 'k')
-#            self.w4.addItem(hist)
-
-            hist = pg.BarGraphItem(height = dwelly, x0 = dwellx[:-1], x1 = dwellx[1:], brush = x)
-            self.w4.addItem(hist)
-
-#            hist = pg.PlotCurveItem(dtx, dty , stepMode = True, fillLevel=0, brush = x, pen = 'k')
-#            self.w5.addItem(hist)
-
-            hist = pg.BarGraphItem(height = dty, x0 = dtx[:-1], x1 = dtx[1:], brush = x)
-            self.w5.addItem(hist)
-
-        self.save()
-
-    def save(self):
-         np.savetxt(self.matfilename+'DB.txt',np.column_stack((self.deli,self.frac,self.dwell,self.dt)),delimiter='\t')
+        if 1:
+            self.coefficients = {'a': np.float(self.ui.LP_a.value()), 'E': np.float(self.ui.LP_E.value()), 'S': np.float(self.ui.LP_S.value()), 'eventlengthLimit': np.float(self.ui.LP_eventlengthThresh.value()) * self.out['samplerate']}
+            self.AnalysisResults[self.sig]={}
+            self.AnalysisResults[self.sig]['RoughEventLocations'] = uf.RecursiveLowPassFast(self.out[self.sig], self.coefficients)
+            if 0:
+                self.AnalysisResultsUp[self.sig] = {}
+                self.AnalysisResultsUp[self.sig]['RoughEventLocations'] = uf.RecursiveLowPassFastUp(self.out[self.sig],                                                                                                self.coefficients)
+            uf.AddInfoAfterRecursive(self)
+            uf.SavingAndPlottingAfterRecursive(self)
+            uf.SaveToHDF5(self)
+            if 'i1' in self.AnalysisResults and 'i2' in self.AnalysisResults:
+                uf.CombineTheTwoChannels(self.matfilename + '_OriginalDB.hdf5')
+                print('Two channels are combined')
+        else:
+            return
 
     def inspectevent(self, clicked = []):
-
-        #Reset plot
-        self.p3.setLabel('bottom', text='Time', units='s')
-        self.p3.setLabel('left', text='Current', units='A')
-        self.p3.clear()
-
-        #Correct for user error if non-extistent number is entered
-        eventbuffer=np.int(self.ui.eventbufferentry.text())
-        firstindex = self.sdf.fn[self.sdf.fn == self.matfilename].index[0]
-        if clicked == []:
-            eventnumber = np.int(self.ui.eventnumberentry.text())
-        else:
-            eventnumber = clicked - firstindex
-            self.ui.eventnumberentry.setText(str(eventnumber))
-        if eventnumber>=self.numberofevents:
-            eventnumber=self.numberofevents-1
-            self.ui.eventnumberentry.setText(str(eventnumber))
-
-        #plot event trace
-        self.p3.plot(self.t[startpoints[eventnumber]-eventbuffer:endpoints[eventnumber]+eventbuffer],
-                     self.data[startpoints[eventnumber]-eventbuffer:endpoints[eventnumber]+eventbuffer], pen='b')
-
-        #plot event fit
-        self.p3.plot(self.t[startpoints[eventnumber]-eventbuffer:endpoints[eventnumber]+eventbuffer],np.concatenate((
-                     np.repeat(np.array([self.baseline]),eventbuffer),np.repeat(np.array([self.baseline-self.deli[eventnumber
-                     ]]),endpoints[eventnumber]-startpoints[eventnumber]),np.repeat(np.array([self.baseline]),eventbuffer)),0),pen=pg.mkPen(color=(173,27,183),width=3))
-
-        self.p3.autoRange()
-        #Mark event that is being viewed on scatter plot
-
-        colors = np.array(self.sdf.color)
-        for i in range(len(colors)):
-            colors[i] = pg.Color(colors[i])
-        colors[firstindex + eventnumber] = pg.mkColor('r')
-
-        self.p2.setBrush(colors, mask=None)
-
-
-        #Mark event start and end points
-        self.p3.plot([self.t[startpoints[eventnumber]], self.t[startpoints[eventnumber]]],[self.data[startpoints[eventnumber]], self.data[startpoints[eventnumber]]],pen=None, symbol='o',symbolBrush='g',symbolSize=12)
-        self.p3.plot([self.t[endpoints[eventnumber]], self.t[endpoints[eventnumber]]],[self.data[endpoints[eventnumber]], self.data[endpoints[eventnumber]]],pen=None, symbol='o',symbolBrush='r',symbolSize=12)
-
-        self.ui.eventinfolabel.setText('Dwell Time=' + str(round(self.dwell[eventnumber],2))+ u' μs,   Deli='+str(round(self.deli[eventnumber]*10**9,2)) +' nA')
-
-
-#        if self.ui.cusumstepentry.text() != 'None':
-#
-# ########################################################################
-#
-#            x=self.data[startpoints[eventnumber]-eventbuffer:endpoints[eventnumber]+eventbuffer]
-#            mins=signal.argrelmin(x)[0]
-#            drift=.0
-#            self.fitthreshold = np.float64(self.ui.cusumstepentry.text())
-#            eventfit=np.array((0))
-#
-#            gp, gn = np.zeros(x.size), np.zeros(x.size)
-#            ta, tai, taf = np.array([[], [], []], dtype=int)
-#            tap, tan = 0, 0
-#            # Find changes (online form)
-#            for i in range(mins[0], mins[-1]):
-#                s = x[i] - x[i-1]
-#                gp[i] = gp[i-1] + s - drift  # cumulative sum for + change
-#                gn[i] = gn[i-1] - s - drift  # cumulative sum for - change
-#                if gp[i] < 0:
-#                    gp[i], tap = 0, i
-#                if gn[i] < 0:
-#                    gn[i], tan = 0, i
-#                if gp[i] > self.fitthreshold or gn[i] > self.fitthreshold:  # change detected!
-#                    ta = np.append(ta, i)    # alarm index
-#                    tai = np.append(tai, tap if gp[i] > self.fitthreshold else tan)  # start
-#                    gp[i], gn[i] = 0, 0      # reset alarm
-#
-#            eventfit=np.repeat(np.array(self.baseline),ta[0])
-#            for i in range(1,ta.size):
-#                eventfit=np.concatenate((eventfit,np.repeat(np.array(np.mean(x[ta[i-1]:ta[i]])),ta[i]-ta[i-1])))
-#            eventfit=np.concatenate((eventfit,np.repeat(np.array(self.baseline),x.size-ta[-1])))
-#            self.p3.plot(self.t[startpoints[eventnumber]-eventbuffer:endpoints[eventnumber]+eventbuffer],eventfit
-#                ,pen=pg.mkPen(color=(255,255,0),width=3))
-#    #        pg.plot(eventfit)
-#
-#
-#            self.p3.plot(self.t[ta+startpoints[eventnumber]-eventbuffer],x[ta],pen=None,symbol='o',symbolBrush='m',symbolSize=8)
-#
-#
-# ########################################################################
-
+        uf.PlotEventDoubleFit(self, clicked)
 
     def nextevent(self):
         eventnumber=np.int(self.ui.eventnumberentry.text())
 
-        if eventnumber>=self.numberofevents-1:
+        if eventnumber>=self.AnalysisResults[self.sig]['NumberOfEvents']-1:
             eventnumber=0
         else:
             eventnumber=np.int(self.ui.eventnumberentry.text())+1
@@ -676,12 +433,7 @@ class GUIForm(QtGui.QMainWindow):
         self.inspectevent()
 
     def previousevent(self):
-
-        eventnumber=np.int(self.ui.eventnumberentry.text())
-
         eventnumber=np.int(self.ui.eventnumberentry.text())-1
-        if eventnumber<0:
-            eventnumber=self.numberofevents-1
         self.ui.eventnumberentry.setText(str(eventnumber))
         self.inspectevent()
 
@@ -744,7 +496,6 @@ class GUIForm(QtGui.QMainWindow):
             cf = pd.DataFrame([cutregion], columns = list(['cutstart', 'cutend']))
             self.batchinfo = self.batchinfo.append(cf, ignore_index = True)
 
-
     def baselinecalc(self):
         if self.lr==[]:
             self.p1.clear()
@@ -771,7 +522,6 @@ class GUIForm(QtGui.QMainWindow):
             self.ui.eventcounterlabel.setText('Baseline='+str(round(self.baseline*10**9,2))+' nA')
             self.p1.autoRange()
 
-
     def clearscatter(self):
         self.p2.setData(x=[],y=[])
         self.lastevent=[]
@@ -784,7 +534,6 @@ class GUIForm(QtGui.QMainWindow):
             'dwell','dt','startpoints','endpoints'])
 
     def deleteevent(self):
-        global startpoints,endpoints
         eventnumber = np.int(self.ui.eventnumberentry.text())
         firstindex = self.sdf.fn[self.sdf.fn == self.matfilename].index[0]
         if eventnumber > self.numberofevents:
@@ -794,8 +543,8 @@ class GUIForm(QtGui.QMainWindow):
         self.dwell=np.delete(self.dwell,eventnumber)
         self.dt=np.delete(self.dt,eventnumber)
         self.frac=np.delete(self.frac,eventnumber)
-        startpoints=np.delete(startpoints,eventnumber)
-        endpoints=np.delete(endpoints,eventnumber)
+        self.startpoints=np.delete(self.startpoints, eventnumber)
+        self.endpoints=np.delete(self.endpoints, eventnumber)
         self.p2.data=np.delete(self.p2.data,firstindex + eventnumber)
 
         self.numberofevents = len(self.dt)
@@ -842,6 +591,7 @@ class GUIForm(QtGui.QMainWindow):
             self.w5.addItem(hist)
 
         self.save()
+        uf.SaveToHDF5(self)
 
     def invertdata(self):
         self.p1.clear()
@@ -867,8 +617,6 @@ class GUIForm(QtGui.QMainWindow):
 
         else:
             self.inspectevent(clickedindex)
-
-
 
     def concatenatetext(self):
         if self.direc==[]:
@@ -917,20 +665,6 @@ class GUIForm(QtGui.QMainWindow):
                 self.datafilename=(filebase+nextindex+'.abf')
                 self.Load()
 
-    def Channel2Button(self):
-        if not self.ui.ndChannel.checkState():
-            self.data = self.out['i1']
-            self.vdata = self.out['v1']
-            self.p1.setLabel('left', text='Channel 1 Current', units='A')
-            self.voltagepl.setLabel('left', text='Channel 1 Voltage', units='V')
-            self.Plot()
-        else:
-            self.data = self.out['i2']
-            self.vdata = self.out['v2']
-            self.p1.setLabel('left', text='Channel 2 Current', units='A')
-            self.voltagepl.setLabel('left', text='Channel 2 Voltage', units='V')
-            self.Plot()
-
     def previousfile(self):
         if str(os.path.splitext(self.datafilename)[1])=='.log':
             startindex=self.matfilename[-6::]
@@ -962,7 +696,7 @@ class GUIForm(QtGui.QMainWindow):
         self.data.astype('d').tofile(self.matfilename+'_trace.bin')
 
     def showcattrace(self):
-        eventbuffer=np.int(self.ui.eventbufferentry.text())
+        eventbuffer=np.int(self.ui.eventbufferentry.value())
         numberofevents=len(self.dt)
 
         self.p1.clear()
@@ -973,8 +707,7 @@ class GUIForm(QtGui.QMainWindow):
                     print('overlapping event')
                 else:
                     eventdata = self.data[startpoints[i]-eventbuffer:endpoints[i]+eventbuffer]
-                    fitdata = np.concatenate((np.repeat(np.array([self.baseline]),eventbuffer),np.repeat(np.array([
-                        self.baseline-self.deli[i]]),endpoints[i]-startpoints[i]),np.repeat(np.array([self.baseline]),eventbuffer)),0)
+                    fitdata = np.concatenate((np.repeat(np.array([self.localBaseline[i]]),eventbuffer),np.repeat(np.array([self.localBaseline[i]-self.deli[i]]),endpoints[i]-startpoints[i]),np.repeat(np.array([self.localBaseline[i]]),eventbuffer)),0)
                     eventtime = np.arange(0,len(eventdata)) + .75*eventbuffer + eventtime[-1]
                     self.p1.plot(eventtime/self.outputsamplerate, eventdata,pen='b')
                     self.p1.plot(eventtime/self.outputsamplerate, fitdata,pen=pg.mkPen(color=(173,27,183),width=2))
@@ -982,7 +715,7 @@ class GUIForm(QtGui.QMainWindow):
         self.p1.autoRange()
 
     def savecattrace(self):
-        eventbuffer=np.int(self.ui.eventbufferentry.text())
+        eventbuffer=np.int(self.ui.eventbufferentry.value())
         numberofevents=len(self.dt)
         self.catdata=self.data[startpoints[0]-eventbuffer:endpoints[0]+eventbuffer]
         self.catfits=np.concatenate((np.repeat(np.array([self.baseline]),eventbuffer),np.repeat(np.array([
@@ -1003,7 +736,6 @@ class GUIForm(QtGui.QMainWindow):
         self.catdata=self.catdata[::10]
         self.catdata.astype('d').tofile(self.matfilename+'_cattrace.bin')
 
-
     def keyPressEvent(self, event):
         key = event.key()
         if key == QtCore.Qt.Key_Up:
@@ -1020,9 +752,11 @@ class GUIForm(QtGui.QMainWindow):
             self.analyze()
         if key == QtCore.Qt.Key_Delete:
             self.deleteevent()
+        if key == QtCore.Qt.Key_S:
+            self.skeypressed()
 
     def saveeventfits(self):
-        eventbuffer=np.int(self.ui.eventbufferentry.text())
+        eventbuffer=np.int(self.ui.eventbufferentry.value())
         numberofevents=len(self.dt)
         self.catdata=self.data[startpoints[0]-eventbuffer:endpoints[0]+eventbuffer]
         self.catfits=np.concatenate((np.repeat(np.array([self.baseline]),eventbuffer),np.repeat(np.array([
@@ -1078,12 +812,6 @@ class GUIForm(QtGui.QMainWindow):
         cusumlines.astype('d').tofile(self.matfilename+'_cusum.bin')
         self.savetrace()
 
-#        amp = np.abs(cusum['jumps']*10**12)*10**9
-#        ampy, ampx = np.histogram(amp,bins=np.linspace(0, np.max(amp), 100))
-#        hist = pg.BarGraphItem(height = ampy, x0 = ampx[:-1], x1 = ampx[1:])
-#        levelplot = pg.plot()
-#        levelplot.addItem(hist)
-
     def savetarget(self):
         self.batchinfo = self.batchinfo.append(pd.DataFrame({'deli':self.deli,
                     'frac':self.frac,'dwell':self.dwell,'dt':self.dt, 
@@ -1125,7 +853,7 @@ class GUIForm(QtGui.QMainWindow):
             #### if user cancels during file selection, exit loop#############
             return
 
-        eventbuffer=np.int(self.ui.eventbufferentry.text())
+        eventbuffer=np.int(self.ui.eventbufferentry.vlaue())
         eventtime = [0]
         ll = np.array([])
 
@@ -1224,11 +952,11 @@ class GUIForm(QtGui.QMainWindow):
                                                                                 y=ylab, extractedSegments = self.cutplot)
         if AllData is not 0:
             # Make IV
-            (IVData, b) = uf.MakeIV(AllData, plot=0)
+            (self.IVData, b) = uf.MakeIV(AllData, plot=0)
             # Fit IV
             self.ivplota.clear()
-            (FitValues, iv) = uf.FitIV(IVData, x=xlab, y=ylab, iv=self.ivplota)
-            self.conductance=FitValues['Slope']
+            (self.FitValues, iv) = uf.FitIV(self.IVData, x=xlab, y=ylab, iv=self.ivplota)
+            self.conductance = self.FitValues['Slope']
             self.UpdateIV()
         # Update Conductance
 
@@ -1258,36 +986,8 @@ class GUIForm(QtGui.QMainWindow):
             self.ui.resistanceText.setEnabled(True)
             self.UpdateIV()
 
-
     def SaveAllFigures(self):
-        figurestosave=[self.psdplot.plotItem, self.ivplota.plotItem, self.p1]
-        name=['PSD', 'IV', 'Trace']
-        print(figurestosave)
-        for index, fig in enumerate(figurestosave):
-            QtGui.QApplication.processEvents()
-            # set export parameters if needed
-            #exporter.parameters()['width'] = 5000  # (note this also affects height parameter
-            # plot export area
-            export_area = pg.GraphicsLayoutWidget(border=(50, 50, 50))
-            # Configure the colors:
-            export_area.setBackground('w')
-            # We resize the widget to our desired export dimensions.
-            # When the widget is hidden, the child widgets do not get resized.
-            # Only when the widget is made visible, the events are propagated to the child widgets.
-            # We immediately hide the widget again to prevent a pop-up or flashing screen.
-            export_area.addPlot(fig)
-            export_area.resize(2000, 1000)
-            export_area.setVisible(True)
-            export_area.setVisible(False)
-            exporter = pg.exporters.ImageExporter(export_area)
-
-            # save to file
-            paths=os.path.split(self.datafilename)
-            direc=paths[0] + os.path.sep + paths[1][:-4] + ' Images'
-            print(direc)
-            if not os.path.isdir(direc):
-                os.mkdir(direc)
-            exporter.export(direc + os.path.sep + name[index] + '_figure.png')
+        self.pp.close()
 
     def DisplaySettings(self):
         if self.ui.actionUse_Clipping.isChecked():
@@ -1303,17 +1003,28 @@ class GUIForm(QtGui.QMainWindow):
             self.p1.setDownsampling(ds=False, auto=True, mode='subsample')
             self.Plot()
 
-    def plotBothClicked(self):
-        self.p1.clear()
-        plot = uf.DoublePlot(self.t, self.out['i1'], self.out['i2'], pw=self.p1)
+    def skeypressed(self):
+        if self.ui.ivplot.underMouse():
+            uf.MatplotLibIV(self)
+        if self.ui.signalplot.underMouse():
+            print('Added to PDF_' + str(self.count))
+            uf.MatplotLibCurrentSignal(self)
+            self.ui.signalplot.setBackground('g')
+            time.sleep(1)
+            self.ui.signalplot.setBackground('w')
+        if self.ui.eventplot.underMouse():
+            print('Event Plot Saved...')
+            uf.SaveEventPlotMatplot(self)
 
+
+def QCloseEvent(w):
+    print('Application closed, config saved...')
 
 def start():
     app = QtGui.QApplication(sys.argv)
     myapp = GUIForm()
     myapp.show()
     sys.exit(app.exec_())
-
 
 if __name__ == "__main__":
     global myapp
