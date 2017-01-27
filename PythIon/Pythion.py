@@ -24,6 +24,8 @@ import matplotlib
 from matplotlib.backends.backend_pdf import PdfPages
 import time
 import h5py
+from timeit import default_timer as timer
+import platform
 
 
 class GUIForm(QtGui.QMainWindow):
@@ -43,19 +45,13 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.cutbutton.clicked.connect(self.cut)
         self.ui.baselinebutton.clicked.connect(self.baselinecalc)
         self.ui.clearscatterbutton.clicked.connect(self.clearscatter)
-        self.ui.deleteeventbutton.clicked.connect(self.deleteevent)
         self.ui.invertbutton.clicked.connect(self.invertdata)
         #self.ui.invertbutton.clicked.connect(self.makeIV)
-        self.ui.concatenatebutton.clicked.connect(self.concatenatetext)
         self.ui.nextfilebutton.clicked.connect(self.nextfile)
         self.ui.previousfilebutton.clicked.connect(self.previousfile)
-        self.ui.savetargetbutton.clicked.connect(self.savetarget)
-        self.ui.showcatbutton.clicked.connect(self.showcattrace)
-        self.ui.savecatbutton.clicked.connect(self.savecattrace)
         self.ui.gobutton.clicked.connect(self.inspectevent)
         self.ui.previousbutton.clicked.connect(self.previousevent)
         self.ui.nextbutton.clicked.connect(self.nextevent)
-        self.ui.savefitsbutton.clicked.connect(self.saveeventfits)
         self.ui.fitbutton.clicked.connect(self.CUSUM)
         self.ui.Poresizeraction.triggered.connect(self.sizethepore)
         self.ui.ndChannel.clicked.connect(self.Plot)
@@ -70,6 +66,10 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.actionUse_Clipping.triggered.connect(self.DisplaySettings)
         self.ui.actionUse_Downsampling.triggered.connect(self.DisplaySettings)
         self.ui.actionSave_IV_Data.triggered.connect(self.SaveIVData)
+        self.ui.actionPlot_Common_Events.triggered.connect(self.EventFiltering)
+        self.ui.actionPlot_i2_detected_only.triggered.connect(self.EventFiltering)
+        self.ui.actionPlot_i1_detected_only.triggered.connect(self.EventFiltering)
+
         self.ui.actionUse_Clipping.setChecked(False)
         #        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
         self.ui.plotBoth.clicked.connect(self.Plot)
@@ -84,7 +84,6 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.voltageplotwin.setBackground('w')
         self.ui.ivplot.setBackground('w')
         self.ui.cutData.setBackground('w')
-
 #        self.ui.PSDplot.setBackground('w')
         self.ui.AxopatchGroup.setVisible(0)
 
@@ -93,7 +92,6 @@ class GUIForm(QtGui.QMainWindow):
         self.transverseAxis = pg.ViewBox()
         self.transverseAxisVoltage = pg.ViewBox()
         self.transverseAxisEvent = pg.ViewBox()
-
 
         self.p1.enableAutoRange(axis='y')
         self.p1.disableAutoRange(axis='x')
@@ -180,7 +178,13 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.LP_E.setOpts(value=0, suffix='x STD', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
         self.ui.LP_eventlengthThresh.setOpts(value=1e-3, suffix='s', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
 
+        self.ui.LP_a_2.setOpts(value=0.999, suffix='', siPrefix=False, dec=True, step=1e-3, minStep=1e-4)
+        self.ui.LP_S_2.setOpts(value=5, suffix='x STD', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+        self.ui.LP_E_2.setOpts(value=0, suffix='x STD', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+        self.ui.LP_eventlengthThresh_2.setOpts(value=1e-3, suffix='s', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+
         ####### Initializing various variables used for analysis##############
+        self.NumberOfEvents=0
         self.AnalysisResults = {}
         self.sig = 'i1'
         self.xaxisIV=self.ui.IVxaxis.currentIndex()
@@ -202,7 +206,11 @@ class GUIForm(QtGui.QMainWindow):
             'dwell','dt','startpoints','endpoints'])
 
     def Load(self, loadandplot = True):
-        if hasattr(self,'pp'):
+        print('File Adress: {}'.format(self.datafilename))
+        print('Timestamp: {}'.format(uf.creation_date(self.datafilename)))
+
+        self.count=0
+        if hasattr(self, 'pp'):
             if hasattr(self.pp,'close'):
                 self.pp.close()
         self.catdata=[]
@@ -218,12 +226,7 @@ class GUIForm(QtGui.QMainWindow):
             colors[i] = pg.Color(colors[i])
 
         self.p2.setBrush(colors, mask=None)
-
         self.ui.eventinfolabel.clear()
-        self.ui.eventcounterlabel.clear()
-        self.ui.meandelilabel.clear()
-        self.ui.meandwelllabel.clear()
-        self.ui.meandtlabel.clear()
         self.totalplotpoints=len(self.p2.data)
         self.ui.eventnumberentry.setText(str(0))
         self.hasbaselinebeenset=0
@@ -231,7 +234,7 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.filelabel.setText(self.datafilename)
         self.LPfiltercutoff = np.float64(self.ui.LPentry.text())*1000
         self.outputsamplerate = np.float64(self.ui.outputsamplerateentry.text())*1000 #use integer multiples of 4166.67 ie 2083.33 or 1041.67
-
+        print()
         if str(os.path.splitext(self.datafilename)[1])=='.dat':
             print('Loading Axopatch Data')
             self.out=uf.ImportAxopatchData(self.datafilename)
@@ -242,7 +245,6 @@ class GUIForm(QtGui.QMainWindow):
                 self.ui.AxopatchGroup.setVisible(1)
             else:
                 self.ui.AxopatchGroup.setVisible(0)
-
 
         if str(os.path.splitext(self.datafilename)[1]) == '.log':
             print('Loading Chimera File')
@@ -352,14 +354,6 @@ class GUIForm(QtGui.QMainWindow):
         if loadandplot == True:
             self.Plot()
 
-        #PDF to save images:
-        filename = os.path.splitext(os.path.basename(self.datafilename))[0]
-        dirname = os.path.dirname(self.datafilename)
-        self.count=1
-        while os.path.isfile(dirname + os.sep + filename + '_AllSavedImages_' + str(self.count) + '.pdf'):
-            self.count+=1
-        self.pp = PdfPages(dirname + os.sep + filename + '_AllSavedImages_' + str(self.count) + '.pdf')
-
     def Plot(self):
         # if self.hasbaselinebeenset==0:
         #     self.baseline=np.median(self.out['i1'])
@@ -374,58 +368,78 @@ class GUIForm(QtGui.QMainWindow):
                 self.sig = 'i1'
                 self.sig2 = 'i2'
         print(self.out[self.sig].shape)
-
-        if self.ui.plotBoth.isChecked():
-            uf.DoublePlot(self)
-        else:
-            uf.PlotSingle(self)
+        if not self.ui.actionDon_t_Plot_if_slow.isChecked():
+            if self.ui.plotBoth.isChecked():
+                uf.DoublePlot(self)
+            else:
+                uf.PlotSingle(self)
 
     def getfile(self):
+        datafilenametemp = QtGui.QFileDialog.getOpenFileName(parent=self, caption='Open file', directory=str(self.direc), filter="Amplifier Files(*.log *.opt *.npy *.txt *.abf *.dat)")
+        if not datafilenametemp[0]=='':
+            self.datafilename=datafilenametemp[0]
+            self.direc=os.path.dirname(self.datafilename)
+            self.Load()
 
-        try:
-            ######## attempt to open dialog from most recent directory########
-            datafilenametemp = QtGui.QFileDialog.getOpenFileName(parent=self, caption='Open file', directory=str(self.direc), filter="Amplifier Files(*.log *.opt *.npy *.txt *.abf *.dat)")
-            self.datafilename=datafilenametemp[0]
-            self.direc=os.path.dirname(self.datafilename)
-            self.Load()
-        except TypeError:
-            ####### if no recent directory exists open from working directory##
-            self.direc==[]
-            datafilenametemp = QtGui.QFileDialog.getOpenFileName(parent=self, caption='Open file', directory=os.getcwd(), filter="Amplifier Files(*.log *.opt *.npy *.txt *.abf *.dat)")
-            self.datafilename=datafilenametemp[0]
-            self.direc=os.path.dirname(self.datafilename)
-            self.Load()
-        except IOError:
-            #### if user cancels during file selection, exit loop#############
-            return
 
     def SaveIVData(self):
         uf.ExportIVData(self)
 
     def analyze(self):
         if 1:
-            self.coefficients = {'a': np.float(self.ui.LP_a.value()), 'E': np.float(self.ui.LP_E.value()), 'S': np.float(self.ui.LP_S.value()), 'eventlengthLimit': np.float(self.ui.LP_eventlengthThresh.value()) * self.out['samplerate']}
-            self.AnalysisResults[self.sig]={}
-            self.AnalysisResults[self.sig]['RoughEventLocations'] = uf.RecursiveLowPassFast(self.out[self.sig], self.coefficients)
-            if 0:
-                self.AnalysisResultsUp[self.sig] = {}
-                self.AnalysisResultsUp[self.sig]['RoughEventLocations'] = uf.RecursiveLowPassFastUp(self.out[self.sig],                                                                                                self.coefficients)
+            self.coefficients={}
+            self.coefficients['i1'] = {'a': np.float(self.ui.LP_a.value()), 'E': np.float(self.ui.LP_E.value()),
+                                 'S': np.float(self.ui.LP_S.value()),
+                                 'eventlengthLimit': np.float(self.ui.LP_eventlengthThresh.value()) * self.out[
+                                     'samplerate']}
+            self.coefficients['i2'] = {'a': np.float(self.ui.LP_a_2.value()), 'E': np.float(self.ui.LP_E_2.value()),
+                                 'S': np.float(self.ui.LP_S_2.value()),
+                                 'eventlengthLimit': np.float(self.ui.LP_eventlengthThresh_2.value()) * self.out[
+                                     'samplerate']}
+            chan = ['i1', 'i2']
+            start1 = timer()
+            for sig in chan:
+                self.AnalysisResults[sig] = {}
+                self.AnalysisResults[sig]['RoughEventLocations'] = uf.RecursiveLowPassFast(self.out[sig], self.coefficients[sig])
+                if 0:
+                    self.AnalysisResultsUp[sig] = {}
+                    self.AnalysisResultsUp[sig]['RoughEventLocations'] = uf.RecursiveLowPassFastUp(self.out[self.sig], self.coefficients[sig])
+
+
+            end1 = timer()
+            print('The Low-pass took {} s on both channels.'.format(str(start1-end1)))
+            self.sig = 'i1'
             uf.AddInfoAfterRecursive(self)
-            uf.SavingAndPlottingAfterRecursive(self)
+            self.sig = 'i2'
+            uf.AddInfoAfterRecursive(self)
+            end2 = timer()
+            print('Adding Info took {} s on both channels.'.format(str(end2-end1)))
+
+            #uf.SavingAndPlottingAfterRecursive(self)
             uf.SaveToHDF5(self)
+            end3 = timer()
+            print('Saving took {} s on both channels.'.format(str(end3-end2)))
+
             if 'i1' in self.AnalysisResults and 'i2' in self.AnalysisResults:
-                uf.CombineTheTwoChannels(self.matfilename + '_OriginalDB.hdf5')
+                (self.CommonIndexes, self.OnlyIndexes) = uf.CombineTheTwoChannels(self.matfilename + '_OriginalDB.hdf5')
                 print('Two channels are combined')
+                uf.EditInfoText(self)
+                self.EventFiltering(self)
+            end4 = timer()
+            print('Combining took {} s on both channels.'.format(str(end4-end3)))
         else:
             return
 
     def inspectevent(self, clicked = []):
-        uf.PlotEventDoubleFit(self, clicked)
+        if self.ui.actionPlot_Common_Events.isChecked():
+            uf.PlotEventDoubleFit(self, clicked)
+        elif self.ui.actionPlot_i1_detected_only.isChecked() or self.ui.actionPlot_i2_detected_only.isChecked():
+            uf.PlotEventDouble(self)
 
     def nextevent(self):
         eventnumber=np.int(self.ui.eventnumberentry.text())
 
-        if eventnumber>=self.AnalysisResults[self.sig]['NumberOfEvents']-1:
+        if eventnumber>=self.NumberOfEvents:
             eventnumber=0
         else:
             eventnumber=np.int(self.ui.eventnumberentry.text())+1
@@ -1007,6 +1021,14 @@ class GUIForm(QtGui.QMainWindow):
         if self.ui.ivplot.underMouse():
             uf.MatplotLibIV(self)
         if self.ui.signalplot.underMouse():
+            if not self.count:
+                # PDF to save images:
+                filename = os.path.splitext(os.path.basename(self.datafilename))[0]
+                dirname = os.path.dirname(self.datafilename)
+                self.count = 1
+                while os.path.isfile(dirname + os.sep + filename + '_AllSavedImages_' + str(self.count) + '.pdf'):
+                    self.count += 1
+                self.pp = PdfPages(dirname + os.sep + filename + '_AllSavedImages_' + str(self.count) + '.pdf')
             print('Added to PDF_' + str(self.count))
             uf.MatplotLibCurrentSignal(self)
             self.ui.signalplot.setBackground('g')
@@ -1016,6 +1038,16 @@ class GUIForm(QtGui.QMainWindow):
             print('Event Plot Saved...')
             uf.SaveEventPlotMatplot(self)
 
+    def EventFiltering(self, who):
+        if self.ui.actionPlot_Common_Events.isChecked():
+            self.NumberOfEvents = len(self.CommonIndexes['i1'])
+        if self.ui.actionPlot_i1_detected_only.isChecked():
+            self.NumberOfEvents = len(self.OnlyIndexes['i1'])
+        if self.ui.actionPlot_i2_detected_only.isChecked():
+            self.NumberOfEvents = len(self.OnlyIndexes['i2'])
+
+    def Test(self):
+        print('Yeeeeaahhh')
 
 def QCloseEvent(w):
     print('Application closed, config saved...')

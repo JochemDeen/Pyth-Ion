@@ -14,6 +14,9 @@ import matplotlib
 from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 import h5py
+from timeit import default_timer as timer
+import platform
+
 
 def Reshape1DTo2D(inputarray, buffersize):
     npieces = np.uint16(len(inputarray)/buffersize)
@@ -353,10 +356,10 @@ def ExportIVData(self):
 def MakePSD(input, samplerate, fig):
     f, Pxx_den = scipy.signal.periodogram(input, samplerate)
     #f, Pxx_den = scipy.signal.welch(input, samplerate, nperseg=10*256, scaling='spectrum')
-    fig.setLabel('left', 'PSD', units='A^2/Hz')
+    fig.setLabel('left', 'PSD', units='pA^2/Hz')
     fig.setLabel('bottom', 'Frequency', units='Hz')
     fig.setLogMode(x=True, y=True)
-    fig.plot(f, Pxx_den, pen='k')
+    fig.plot(f, Pxx_den*1e24, pen='k')
     return (f,Pxx_den)
 
 def YorkFit(X, Y, sigma_X, sigma_Y, r=0):
@@ -481,7 +484,6 @@ def SaveDerivatives(self):
 
     PartToConsider=np.array(self.p1.viewRange()[0])
     partinsamples = np.int64(np.round(self.out['samplerate'] * PartToConsider))
-    print(partinsamples)
     t = self.t[partinsamples[0]:partinsamples[1]]
     i1part = self.out['i1'][partinsamples[0]:partinsamples[1]]
     i2part = self.out['i2'][partinsamples[0]:partinsamples[1]]
@@ -625,10 +627,9 @@ def SaveToHDF5(self):
     general.create_dataset('TransverseRecorded', data=self.out['graphene'])
     segmentation_LP = f.create_group("LowPassSegmentation")
     for k,l in self.AnalysisResults.items():
-        print(k)
         set1 = segmentation_LP.create_group(k)
         lpset1 = set1.create_group('LowPassSettings')
-        for o, p in self.coefficients.items():
+        for o, p in self.coefficients[k].items():
              lpset1.create_dataset(o, data=p)
         for m, l in self.AnalysisResults[k].items():
              set1.create_dataset(m, data=l)
@@ -724,6 +725,8 @@ def RecursiveLowPassFast(signal, coeff):
             while signal[k2] > Mm:
                 k2 -= 1
             endp = k2
+            if start<0:
+                start=0
             RoughEventLocations.append((start, endp, ml[start], vl[start]))
 
     return np.array(RoughEventLocations)
@@ -777,6 +780,7 @@ def AddInfoAfterRecursive(self):
     localBaseline = self.AnalysisResults[self.sig]['RoughEventLocations'][:, 2]
     localVariance = self.AnalysisResults[self.sig]['RoughEventLocations'][:, 3]
 
+    CusumBaseline=500
     numberofevents = len(startpoints)
 
     self.AnalysisResults[self.sig]['StartPoints'] = startpoints
@@ -790,33 +794,38 @@ def AddInfoAfterRecursive(self):
 
     deli = np.zeros(numberofevents)
     dwell = np.zeros(numberofevents)
+    limit=500e-6*self.out['samplerate']
+    AllFits={}
 
     for i in range(numberofevents):
-        mins = np.array(signal.argrelmin(self.out[self.sig][startpoints[i]:endpoints[i]])[0] + startpoints[i],
-                        dtype=np.uint64)
-        print(mins)
-        mins = mins[self.out[self.sig][mins] < localBaseline[i] - 4 * localVariance[i]]
-        if len(mins) == 1:
-            pass
-            deli[i] = localBaseline[i] - min(self.out[self.sig][startpoints[i]:endpoints[i]])
+        length = endpoints[i] - startpoints[i]
+        if length <= limit and length>3:
+            # Impulsion Fit to minimal value
+            deli[i] = localBaseline[i] - np.min(self.out[self.sig][startpoints[i]+1:endpoints[i]-1])
             dwell[i] = (endpoints[i] - startpoints[i]) / self.out['samplerate']
-            endpoints[i] = mins[0]
-        elif len(mins) > 1:
-            deli[i] = localBaseline[i] - np.min(self.out[self.sig][mins[0]:mins[-1]])
-            endpoints[i] = mins[-1]
+        elif length > limit:
+            deli[i] = localBaseline[i] - np.mean(self.out[self.sig][startpoints[i]+5:endpoints[i]-5])
             dwell[i] = (endpoints[i] - startpoints[i]) / self.out['samplerate']
-
-            # startpoints = startpoints[deli != 0]
-            # endpoints = endpoints[deli != 0]
-            # deli = deli[deli != 0]
-            # dwell = dwell[deli != 0]
-            # localBaseline = localBaseline[deli != 0]
+            # # Cusum Fit
+            # sigma = np.sqrt(localVariance[i])
+            # delta = 2e-9
+            # h = 1 * delta / sigma
+            # (mc, kd, krmv) = CUSUM(self.out[self.sig][startpoints[i]-CusumBaseline:endpoints[i]+CusumBaseline], delta, h)
+            # zeroPoint = startpoints[i]-CusumBaseline
+            # krmv = krmv+zeroPoint+1
+            # AllFits['Event' + str(i)] = {}
+            # AllFits['Event' + str(i)]['mc'] = mc
+            # AllFits['Event' + str(i)]['krmv'] = krmv
+        else:
+            deli[i] = localBaseline[i] - np.min(self.out[self.sig][startpoints[i]:endpoints[i]])
+            dwell[i] = (endpoints[i] - startpoints[i]) / self.out['samplerate']
 
     frac = deli / localBaseline
     dt = np.array(0)
     dt = np.append(dt, np.diff(startpoints) / self.out['samplerate'])
     numberofevents = len(dt)
 
+    #self.AnalysisResults[self.sig]['CusumFits'] = AllFits
     self.AnalysisResults[self.sig]['FractionalCurrentDrop'] = frac
     self.AnalysisResults[self.sig]['DeltaI'] = deli
     self.AnalysisResults[self.sig]['DwellTime'] = dwell
@@ -833,17 +842,13 @@ def SavingAndPlottingAfterRecursive(self):
     dt=self.AnalysisResults[self.sig]['Frequency']
     localBaseline=self.AnalysisResults[self.sig]['LocalBaseline']
 
-    self.p1.clear()
-    # Event detection plot, Main Window
-    self.p1.plot(self.t, self.out[self.sig], pen='b')
-    self.p1.plot(self.t[startpoints],  self.out[self.sig][startpoints], pen=None, symbol='o', symbolBrush='g', symbolSize=10)
-    self.p1.plot(self.t[endpoints],  self.out[self.sig][endpoints], pen=None, symbol='o', symbolBrush='r', symbolSize=10)
-    #self.p1.plot(self.t[startpoints-10], localBaseline, pen=None, symbol='x', symbolBrush='y', symbolSize=10)
-
-    self.ui.eventcounterlabel.setText('Events:' + str(numberofevents))
-    self.ui.meandelilabel.setText('Mean Current Drop: ' + pg.siFormat(np.mean(deli), precision=5, suffix='A', space=True, error=None, minVal=1e-25, allowUnicode=True))
-    self.ui.meandwelllabel.setText('Dwell: ' + pg.siFormat(np.median(dwell), precision=5, suffix='s', space=True, error=None, minVal=1e-25, allowUnicode=True))
-    self.ui.meandtlabel.setText('Rate: ' + pg.siFormat(numberofevents / self.t[-1], precision=5, suffix='1/s', space=True, error=None, minVal=1e-25, allowUnicode=True))
+    if not self.ui.actionDon_t_Plot_if_slow.isChecked():
+        self.p1.clear()
+        # Event detection plot, Main Window
+        self.p1.plot(self.t, self.out[self.sig], pen='b')
+        self.p1.plot(self.t[startpoints],  self.out[self.sig][startpoints], pen=None, symbol='o', symbolBrush='g', symbolSize=10)
+        self.p1.plot(self.t[endpoints],  self.out[self.sig][endpoints], pen=None, symbol='o', symbolBrush='r', symbolSize=10)
+        #self.p1.plot(self.t[startpoints-10], localBaseline, pen=None, symbol='x', symbolBrush='y', symbolSize=10)
 
     try:
         self.p2.data = self.p2.data[np.where(np.array(self.sdf.fn) != self.matfilename)]
@@ -916,31 +921,33 @@ def save(self):
                delimiter='\t')
 
 def PlotEventSingle(self, clicked=[]):
-    startpoints=self.AnalysisResults[self.sig]['StartPoints']
-    endpoints=self.AnalysisResults[self.sig]['EndPoints']
-    deli=self.AnalysisResults[self.sig]['DeltaI']
-    dwell=self.AnalysisResults[self.sig]['DwellTime']
-    localBaseline=self.AnalysisResults[self.sig]['LocalBaseline']
+    f = h5py.File(self.matfilename + '_OriginalDB.hdf5', "r")
+    if self.ui.actionPlot_i1_detected_only.isChecked():
+        sig = 'i1'
+        sig2 = 'i2'
+    if self.ui.actionPlot_i2_detected_only.isChecked():
+        sig = 'i2'
+        sig2 = 'i1'
+
+        i1_indexes = f['LowPassSegmentation/i1/CommonIndex']
+        i2_indexes = f['LowPassSegmentation/i2/CommonIndex']
+        i1 = f['LowPassSegmentation/i1/']
+        i2 = f['LowPassSegmentation/i2/']
+
+    startpoints=self.AnalysisResults[sig]['StartPoints']
+    endpoints=self.AnalysisResults[sig]['EndPoints']
+    localBaseline=self.AnalysisResults[sig]['LocalBaseline']
+
     # Reset plot
     self.p3.setLabel('bottom', text='Time', units='s')
     self.p3.setLabel('left', text='Current', units='A')
     self.p3.clear()
-
-    # Correct for user error if non-extistent number is entered
+    eventnumber = np.int(self.ui.eventnumberentry.text())
     eventbuffer = np.int(self.ui.eventbufferentry.value())
-    firstindex = self.sdf.fn[self.sdf.fn == self.matfilename].index[0]
-    if clicked == []:
-        eventnumber = np.int(self.ui.eventnumberentry.text())
-    else:
-        eventnumber = clicked - firstindex
-        self.ui.eventnumberentry.setText(str(eventnumber))
-    if eventnumber >= self.numberofevents:
-        eventnumber = self.numberofevents - 1
-        self.ui.eventnumberentry.setText(str(eventnumber))
 
     # plot event trace
     self.p3.plot(self.t[startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
-                 self.out[self.sig][startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
+                 self.out[sig][startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
                  pen='b')
 
     # plot event fit
@@ -953,49 +960,31 @@ def PlotEventSingle(self, clicked=[]):
 
     # plot 2nd Channel
     self.p3.plot(self.t[startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
-                 self.out[self.sig2][startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
+                 self.out[sig2][startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
                  pen='r')
 
     self.p3.autoRange()
-    # Mark event that is being viewed on scatter plot
-
-    colors = np.array(self.sdf.color)
-    for i in range(len(colors)):
-        colors[i] = pg.Color(colors[i])
-    colors[firstindex + eventnumber] = pg.mkColor('r')
-
-    self.p2.setBrush(colors, mask=None)
-
-    # Mark event start and end points
-    self.p3.plot([self.t[startpoints[eventnumber]], self.t[startpoints[eventnumber]]],
-                 [self.out[self.sig][startpoints[eventnumber]], self.out[self.sig][startpoints[eventnumber]]], pen=None,
-                 symbol='o', symbolBrush='g', symbolSize=12)
-    self.p3.plot([self.t[endpoints[eventnumber]], self.t[endpoints[eventnumber]]],
-                 [self.out[self.sig][endpoints[eventnumber]], self.out[self.sig][endpoints[eventnumber]]], pen=None,
-                 symbol='o', symbolBrush='r', symbolSize=12)
-
-    dtime = pg.siFormat(dwell[eventnumber], precision=5, suffix='s', space=True, error=None, minVal=1e-25,
-                        allowUnicode=True)
-    dI = pg.siFormat(deli[eventnumber], precision=5, suffix='A', space=True, error=None, minVal=1e-25,
-                     allowUnicode=True)
-    self.ui.eventinfolabel.setText('Dwell Time=' + dtime + ',   Deli=' + dI)
 
 def PlotEventDouble(self, clicked=[]):
-    startpoints = self.AnalysisResults[self.sig]['StartPoints']
-    endpoints = self.AnalysisResults[self.sig]['EndPoints']
-    deli = self.AnalysisResults[self.sig]['DeltaI']
-    localBaseline = self.AnalysisResults[self.sig]['LocalBaseline']
-    dwell = self.AnalysisResults[self.sig]['DwellTime']
+    f = h5py.File(self.matfilename + '_OriginalDB.hdf5', "r")
 
+    if self.ui.actionPlot_i1_detected_only.isChecked():
+        indexes = f['LowPassSegmentation/i1/OnlyIndex']
+        i = f['LowPassSegmentation/i1/']
+        sig = 'i1'
+        sig2 = 'i2'
+        leftlabel = "Ionic Current"
+        rightlabel = "Transverse Current"
+    if self.ui.actionPlot_i2_detected_only.isChecked():
+        indexes = f['LowPassSegmentation/i2/OnlyIndex']
+        i = f['LowPassSegmentation/i2/']
+        sig = 'i2'
+        sig2 = 'i1'
+        rightlabel = "Ionic Current"
+        leftlabel = "Transverse Current"
     self.p3.clear()
     self.transverseAxisEvent.clear()
 
-    if self.sig=='i1':
-        leftlabel="Ionic Current"
-        rightlabel="Transverse Current"
-    else:
-        rightlabel="Ionic Current"
-        leftlabel="Transverse Current"
     p1 = self.p3.plotItem
     p1.getAxis('left').setLabel(text=leftlabel, color='#0000FF', units='A')
     ## create a new ViewBox, link the right axis to its coordinate system
@@ -1014,70 +1003,56 @@ def PlotEventDouble(self, clicked=[]):
     updateViews()
     p1.vb.sigResized.connect(updateViews)
 
-    #p1.plot(self.t, self.out['i1'], pen='b')
-    #self.transverseAxisEvent.addItem(pg.PlotCurveItem(self.t, self.out['i2'], pen='r'))
-
     # Correct for user error if non-extistent number is entered
     eventbuffer = np.int(self.ui.eventbufferentry.value())
-    firstindex = self.sdf.fn[self.sdf.fn == self.matfilename].index[0]
-    if clicked == []:
-        eventnumber = np.int(self.ui.eventnumberentry.text())
-    else:
-        eventnumber = clicked - firstindex
+    maxEvents=self.NumberOfEvents
+
+    eventnumber = np.int(self.ui.eventnumberentry.text())
+    if eventnumber >= maxEvents:
+        eventnumber=0
         self.ui.eventnumberentry.setText(str(eventnumber))
-    if eventnumber >= self.AnalysisResults[self.sig]['NumberOfEvents']:
-        eventnumber = self.AnalysisResults[self.sig]['NumberOfEvents'] - 1
+    elif eventnumber < 0:
+        eventnumber=maxEvents
         self.ui.eventnumberentry.setText(str(eventnumber))
 
     # plot event trace
+    parttoplot=np.arange(i['StartPoints'][indexes[eventnumber]] - eventbuffer, i['EndPoints'][indexes[eventnumber]] + eventbuffer,1, dtype=np.uint64)
 
-    parttoplot=np.arange(startpoints[eventnumber] - eventbuffer, endpoints[eventnumber] + eventbuffer,1, dtype=np.uint64)
-    p1.plot(self.t[parttoplot], self.out[self.sig][parttoplot],pen='b')
+    p1.plot(self.t[parttoplot], self.out[sig][parttoplot], pen='b')
 
     # plot event fit
     p1.plot(self.t[parttoplot],
                  np.concatenate((
-                     np.repeat(np.array([localBaseline[eventnumber]]), eventbuffer),
-                     np.repeat(np.array([localBaseline[eventnumber] - deli[eventnumber
-                     ]]), endpoints[eventnumber] - startpoints[eventnumber]),
-                     np.repeat(np.array([localBaseline[eventnumber]]), eventbuffer)), 0),
+                     np.repeat(np.array([i['LocalBaseline'][indexes[eventnumber]]]), eventbuffer),
+                     np.repeat(np.array([i['LocalBaseline'][indexes[eventnumber]] - i['DeltaI'][indexes[eventnumber]
+                     ]]), i['EndPoints'][indexes[eventnumber]] - i['StartPoints'][indexes[eventnumber]]),
+                     np.repeat(np.array([i['LocalBaseline'][indexes[eventnumber]]]), eventbuffer)), 0),
                  pen=pg.mkPen(color=(173, 27, 183), width=3))
 
     # plot 2nd Channel
-    self.transverseAxisEvent.addItem(pg.PlotCurveItem(self.t[parttoplot],
-                 self.out[self.sig2][parttoplot],
-                 pen='r'))
+    self.transverseAxisEvent.addItem(pg.PlotCurveItem(self.t[parttoplot], self.out[sig2][parttoplot], pen='r'))
 
-    min1 = np.min(self.out[self.sig][parttoplot])
-    max1 = np.max(self.out[self.sig][parttoplot])
+    min1 = np.min(self.out[sig][parttoplot])
+    max1 = np.max(self.out[sig][parttoplot])
     self.p3.setYRange(min1-(max1-min1), max1)
     self.p3.enableAutoRange(axis='x')
-    min2 = np.min(self.out[self.sig2][parttoplot])
-    max2 = np.max(self.out[self.sig2][parttoplot])
+    min2 = np.min(self.out[sig2][parttoplot])
+    max2 = np.max(self.out[sig2][parttoplot])
     self.transverseAxisEvent.setYRange(min2, max2+(max2-min2))
 
-    # Mark event that is being viewed on scatter plot
-
-    colors = np.array(self.sdf.color)
-    for i in range(len(colors)):
-        colors[i] = pg.Color(colors[i])
-    colors[firstindex + eventnumber] = pg.mkColor('r')
-
-    self.p2.setBrush(colors, mask=None)
-
     # Mark event start and end points
-    p1.plot([self.t[startpoints[eventnumber]], self.t[startpoints[eventnumber]]],
-                 [self.out[self.sig][startpoints[eventnumber]], self.out[self.sig][startpoints[eventnumber]]],
+    p1.plot([self.t[i['StartPoints'][indexes[eventnumber]]], self.t[i['StartPoints'][indexes[eventnumber]]]],
+                 [self.out[sig][i['StartPoints'][indexes[eventnumber]]], self.out[sig][i['StartPoints'][indexes[eventnumber]]]],
                  pen=None,
                  symbol='o', symbolBrush='g', symbolSize=12)
-    p1.plot([self.t[endpoints[eventnumber]], self.t[endpoints[eventnumber]]],
-                 [self.out[self.sig][endpoints[eventnumber]], self.out[self.sig][endpoints[eventnumber]]],
+    p1.plot([self.t[i['EndPoints'][indexes[eventnumber]]], self.t[i['EndPoints'][indexes[eventnumber]]]],
+                 [self.out[sig][i['EndPoints'][indexes[eventnumber]]], self.out[sig][i['EndPoints'][indexes[eventnumber]]]],
                  pen=None,
                  symbol='o', symbolBrush='r', symbolSize=12)
 
-    dtime=pg.siFormat(dwell[eventnumber], precision=5, suffix='s', space=True, error=None, minVal=1e-25, allowUnicode=True)
-    dI=pg.siFormat(deli[eventnumber], precision=5, suffix='A', space=True, error=None, minVal=1e-25, allowUnicode=True)
-    self.ui.eventinfolabel.setText('Dwell Time=' + dtime + ',   Deli=' + dI)
+    dtime=pg.siFormat(i['DwellTime'][indexes[eventnumber]], precision=5, suffix='s', space=True, error=None, minVal=1e-25, allowUnicode=True)
+    dI=pg.siFormat(i['DwellTime'][indexes[eventnumber]], precision=5, suffix='A', space=True, error=None, minVal=1e-25, allowUnicode=True)
+    self.ui.eventinfolabel.setText(leftlabel + ': Dwell Time=' + dtime + ', Deli=' + dI)
 
 def PlotEventDoubleFit(self, clicked=[]):
     f = h5py.File(self.matfilename + '_OriginalDB.hdf5', "r")
@@ -1172,13 +1147,12 @@ def PlotEventDoubleFit(self, clicked=[]):
                  pen=None,
                  symbol='o', symbolBrush='r', symbolSize=12))
 
-
     dtime=pg.siFormat(i1['DwellTime'][i1_indexes[eventnumber]], precision=5, suffix='s', space=True, error=None, minVal=1e-25, allowUnicode=True)
     dI=pg.siFormat(i1['DwellTime'][i1_indexes[eventnumber]], precision=5, suffix='A', space=True, error=None, minVal=1e-25, allowUnicode=True)
     dtime2=pg.siFormat(i2['DwellTime'][i2_indexes[eventnumber]], precision=5, suffix='s', space=True, error=None, minVal=1e-25, allowUnicode=True)
     dI2=pg.siFormat(i2['DwellTime'][i2_indexes[eventnumber]], precision=5, suffix='A', space=True, error=None, minVal=1e-25, allowUnicode=True)
 
-    self.ui.eventinfolabel.setText('Ionic Dwell Time=' + dtime + ',   Ionic Deli=' + dI + '\n' 'Trans Dwell Time=' + dtime2 + ',   Trans Deli=' + dI2)
+    self.ui.eventinfolabel.setText('Ionic Dwell Time=' + dtime + ',   Ionic Deli=' + dI + ', ' 'Trans Dwell Time=' + dtime2 + ',   Trans Deli=' + dI2)
 
 def SaveEventPlotMatplot(self):
     eventbuffer = np.int(self.ui.eventbufferentry.value())
@@ -1208,25 +1182,39 @@ def SaveEventPlotMatplot(self):
 
 def CombineTheTwoChannels(file):
     f = h5py.File(file, 'a')
-
     i1 = f['LowPassSegmentation/i1/']
     i2 = f['LowPassSegmentation/i2/']
+    i1StartP = i1['StartPoints'][:]
+    i2StartP = i2['StartPoints'][:]
 
     # Common Events
     # Take Longer
     CommonEventsi1Index = np.array([], dtype=np.uint64)
     CommonEventsi2Index = np.array([], dtype=np.uint64)
-    DelayLimit = 100
+    DelayLimit = 10e-3*f['General/Samplerate/'].value
 
-    for i in range(len(i1['StartPoints'])):
-        for j in range(len(i2['StartPoints'])):
-            if np.absolute(i1['StartPoints'][i] - i2['StartPoints'][j]) < DelayLimit:
-                CommonEventsi1Index = np.append(CommonEventsi1Index, i)
-                CommonEventsi2Index = np.append(CommonEventsi2Index, j)
+    for k in i1StartP:
+        val = i2StartP[(i2StartP > k - DelayLimit) & (i2StartP < k + DelayLimit)]
+        if len(val)==1:
+            CommonEventsi2Index = np.append(CommonEventsi2Index, np.where(i2StartP == val)[0])
+            CommonEventsi1Index = np.append(CommonEventsi1Index, np.where(i1StartP == k)[0])
+        if len(val) > 1:
+            diff=np.absolute(val-k)
+            minIndex=np.where(diff == np.min(diff))
+            CommonEventsi2Index = np.append(CommonEventsi2Index, np.where(i2StartP == val[minIndex])[0])
+            CommonEventsi1Index = np.append(CommonEventsi1Index, np.where(i1StartP == k)[0])
+
+
+    # for i in range(len(i1StartP)):
+    #     for j in range(len(i2StartP)):
+    #         if np.absolute(i1StartP[i] - i2StartP[j]) < DelayLimit:
+    #             CommonEventsi1Index = np.append(CommonEventsi1Index, i)
+    #             CommonEventsi2Index = np.append(CommonEventsi2Index, j)
+
     # Only i1
-    Onlyi1Indexes = np.delete(range(len(i1['StartPoints'])), CommonEventsi1Index)
+    Onlyi1Indexes = np.delete(range(len(i1StartP)), CommonEventsi1Index)
     # Only i2
-    Onlyi2Indexes = np.delete(range(len(i2['StartPoints'])), CommonEventsi2Index)
+    Onlyi2Indexes = np.delete(range(len(i2StartP)), CommonEventsi2Index)
 
     e = "CommonIndex" in i1
     if e:
@@ -1244,16 +1232,125 @@ def CombineTheTwoChannels(file):
         i1.create_dataset('OnlyIndex', data=Onlyi1Indexes)
         i2.create_dataset('OnlyIndex', data=Onlyi2Indexes)
 
-def PlotEvent(t1, t2, i1, i2, fit1, fit2):
+    CommonIndexes={}
+    CommonIndexes['i1']=CommonEventsi1Index
+    CommonIndexes['i2']=CommonEventsi2Index
+    OnlyIndexes={}
+    OnlyIndexes['i1'] = Onlyi1Indexes
+    OnlyIndexes['i2'] = Onlyi2Indexes
+    return (CommonIndexes, OnlyIndexes)
+
+def PlotEvent(t1, t2, i1, i2, fit1 = np.array([]), fit2 = np.array([])):
     fig1 = plt.figure(1, figsize=(20, 7))
     ax1 = fig1.add_subplot(211)
     ax2 = fig1.add_subplot(212, sharex=ax1)
-    ax1.plot(t1, i1, 'b')
-    ax1.plot(t1, fit1, 'y')
-    ax2.plot(t2, i2, 'r')
-    ax2.plot(t2, fit2, 'y')
+    ax1.plot(t1, i1*1e9, 'b')
+    if len(fit1) is not 0:
+        ax1.plot(t1, fit1*1e9, 'y')
+    ax2.plot(t2, i2*1e9, 'r')
+    if len(fit2) is not 0:
+        ax2.plot(t2, fit2*1e9, 'y')
     ax1.set_ylabel('Ionic Current [nA]')
-    ax1.set_xticklabels([])
+    #ax1.set_xticklabels([])
     ax2.set_ylabel('Transverse Current [nA]')
-    ax2.set_xlabel('Time [us]')
+    ax2.set_xlabel('Time [ms]')
+    ax2.ticklabel_format(useOffset=False)
+    ax2.ticklabel_format(useOffset=False)
+    ax1.ticklabel_format(useOffset=False)
+    ax1.ticklabel_format(useOffset=False)
+
     return fig1
+
+def EditInfoText(self):
+    text2='ionic: {} events, trans: {} events\n'.format(str(self.AnalysisResults['i1']['RoughEventLocations'].shape[0]), str(self.AnalysisResults['i2']['RoughEventLocations'].shape[0]))
+    text1='The file contains:\n{} Common Events\n{} Ionic Only Events\n{} Transverse Only Events'.format(len(self.CommonIndexes['i1']), len(self.OnlyIndexes['i1']), len(self.OnlyIndexes['i2']))
+    self.ui.InfoTexts.setText(text2+text1)
+
+def creation_date(path_to_file):
+    if platform.system() == 'Windows':
+        return os.path.getctime(path_to_file)
+    else:
+        stat = os.stat(path_to_file)
+        try:
+            return stat.st_mtime
+        except AttributeError:
+            # We're probably on Linux. No easy way to get creation dates here,
+            # so we'll settle for when its content was last modified.
+            return stat.st_mtime
+
+def CUSUM(input, delta, h):
+    Nd = 0
+    kd = len(input)
+    krmv = len(input)
+    k0 = 0
+    k = 0
+    l = len(input)
+    m = np.zeros(l)
+    m[k0] = input[k0]
+    v = np.zeros(l)
+    sp = np.zeros(l)
+    Sp = np.zeros(l)
+    gp = np.zeros(l)
+    sn = np.zeros(l)
+    Sn = np.zeros(l)
+    gn = np.zeros(l)
+
+    while k < l:
+        m[k] = np.mean(input[k0:k])
+        v[k] = np.var(input[k0:k])
+
+        sp[k] = delta / v[k] * (input[k] - m[k] - delta / 2)
+        sn[k] = -delta / v[k] * (input[k] - m[k] + delta / 2)
+
+        Sp[k] = Sp[k - 1] + sp[k]
+        Sn[k] = Sn[k - 1] + sn[k]
+
+        gp[k] = np.max(gp[k - 1] + sp[k], 0)
+        gn[k] = np.max(gn[k - 1] + sn[k], 0)
+
+        if gp[k] > h or gn[k] > h:
+            kd[Nd] = k
+            kmin = int(np.where(Sn == np.min(Sn[k0:k]))[0])
+            krmv[Nd] = kmin + k0 - 1
+            if gp(k) > h:
+                kmin = int(np.where(Sn == np.min(Sn[k0:k]))[0])
+                krmv[Nd] = kmin + k0 - 1
+            k0 = k
+            m[k0] = input[k0]
+            v[k0] = 0
+            sp[k0] = 0
+            Sp[k0] = 0
+            gp[k0] = 0
+            sn[k0] = 0
+            Sn[k0] = 0
+            gn[k0] = 0
+            Nd = Nd + 1
+        k += 1
+
+    if Nd == 0:
+        mc = np.mean(input) * np.ones(k)
+    elif Nd == 1:
+        mc = [m[krmv[0]] * np.ones(krmv[0]), m[k] * np.ones(k - krmv[0])]
+    else:
+        mc = m[krmv[0]] * np.ones(krmv[0])
+        for ii in range(1, Nd):
+            mc = [mc, m[krmv[ii]] * np.ones(krmv[ii] - krmv[ii - 1])]
+        mc = [mc, m(k) * np.ones(k - krmv[Nd])]
+    return (mc, kd, krmv)
+
+def CombineEventDatabases(filename, DBfiles):
+    f = h5py.File(filename, "w")
+
+    general = f.create_group("RawDB")
+    general.create_dataset('FileName', data=self.out['filename'])
+    general.create_dataset('Samplerate', data=self.out['samplerate'])
+    general.create_dataset('Machine', data=self.out['type'])
+    general.create_dataset('TransverseRecorded', data=self.out['graphene'])
+    segmentation_LP = f.create_group("LowPassSegmentation")
+    for k, l in self.AnalysisResults.items():
+        set1 = segmentation_LP.create_group(k)
+        lpset1 = set1.create_group('LowPassSettings')
+        for o, p in self.coefficients[k].items():
+            lpset1.create_dataset(o, data=p)
+        for m, l in self.AnalysisResults[k].items():
+            set1.create_dataset(m, data=l)

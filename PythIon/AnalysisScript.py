@@ -16,9 +16,6 @@ directory = (str(os.path.split(datafile)[0]) + os.sep + expname + '_SavedImages'
 if not os.path.exists(directory):
     os.makedirs(directory)
 
-file = '/Users/migraf/Desktop/Temp/Axo Data/17B_10mMCis100mMtransKCl_80mer_2.dat'
-datafile = '/Users/migraf/Desktop/Temp/Axo Data/17B_10mMCis100mMtransKCl_80mer_2_OriginalDB.hdf5'
-
 #out = uf.ImportAxopatchData(file)
 
 f = h5py.File(datafile, 'r')
@@ -26,12 +23,13 @@ f = h5py.File(datafile, 'r')
 i1data = f['LowPassSegmentation/i1/']
 i2data = f['LowPassSegmentation/i2/']
 
-ind1 = np.uint64(i1data['OnlyIndex'][:])
-ind2 = np.uint64(i2data['OnlyIndex'][:])
+ind1 = np.uint64(i1data['CommonIndex'][:])
+ind2 = np.uint64(i2data['CommonIndex'][:])
 indexes1 = np.zeros(len(i1data['DwellTime']), dtype=np.bool)
 indexes1[ind1] = 1
 indexes2 = np.zeros(len(i2data['DwellTime']), dtype=np.bool)
 indexes2[ind2] = 1
+
 print(len(i1data['OnlyIndex'][:]))
 print(len(i2data['OnlyIndex'][:]))
 
