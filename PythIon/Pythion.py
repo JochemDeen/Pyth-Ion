@@ -185,6 +185,7 @@ class GUIForm(QtGui.QMainWindow):
 
         ####### Initializing various variables used for analysis##############
         self.NumberOfEvents=0
+        self.UpwardsOn=0
         self.AnalysisResults = {}
         self.sig = 'i1'
         self.xaxisIV=self.ui.IVxaxis.currentIndex()
@@ -381,17 +382,16 @@ class GUIForm(QtGui.QMainWindow):
             self.direc=os.path.dirname(self.datafilename)
             self.Load()
 
-
     def SaveIVData(self):
         uf.ExportIVData(self)
 
     def analyze(self):
-        if 1:
-            self.coefficients={}
-            self.coefficients['i1'] = {'a': np.float(self.ui.LP_a.value()), 'E': np.float(self.ui.LP_E.value()),
-                                 'S': np.float(self.ui.LP_S.value()),
-                                 'eventlengthLimit': np.float(self.ui.LP_eventlengthThresh.value()) * self.out[
-                                     'samplerate']}
+        self.coefficients = {}
+        self.coefficients['i1'] = {'a': np.float(self.ui.LP_a.value()), 'E': np.float(self.ui.LP_E.value()),
+                                   'S': np.float(self.ui.LP_S.value()),
+                                   'eventlengthLimit': np.float(self.ui.LP_eventlengthThresh.value()) * self.out[
+                                       'samplerate']}
+        if self.out['graphene']:
             self.coefficients['i2'] = {'a': np.float(self.ui.LP_a_2.value()), 'E': np.float(self.ui.LP_E_2.value()),
                                  'S': np.float(self.ui.LP_S_2.value()),
                                  'eventlengthLimit': np.float(self.ui.LP_eventlengthThresh_2.value()) * self.out[
@@ -401,9 +401,9 @@ class GUIForm(QtGui.QMainWindow):
             for sig in chan:
                 self.AnalysisResults[sig] = {}
                 self.AnalysisResults[sig]['RoughEventLocations'] = uf.RecursiveLowPassFast(self.out[sig], self.coefficients[sig])
-                if 0:
-                    self.AnalysisResultsUp[sig] = {}
-                    self.AnalysisResultsUp[sig]['RoughEventLocations'] = uf.RecursiveLowPassFastUp(self.out[self.sig], self.coefficients[sig])
+                if self.UpwardsOn:
+                    self.AnalysisResultsUp[sig+'_Up'] = {}
+                    self.AnalysisResultsUp[sig+'_Up']['RoughEventLocations'] = uf.RecursiveLowPassFastUp(self.out[self.sig], self.coefficients[sig])
 
 
             end1 = timer()
@@ -428,18 +428,36 @@ class GUIForm(QtGui.QMainWindow):
             end4 = timer()
             print('Combining took {} s on both channels.'.format(str(end4-end3)))
         else:
-            return
+            start1 = timer()
+            self.AnalysisResults['i1'] = {}
+            self.AnalysisResults['i1']['RoughEventLocations'] = uf.RecursiveLowPassFast(self.out['i1'], self.coefficients['i1'])
+            if self.UpwardsOn:
+                self.AnalysisResults['i1_Up']['RoughEventLocations'] = uf.RecursiveLowPassFast(self.out['i1'],
+                                                                                            self.coefficients['i1'])
+            end1 = timer()
+            print('The Low-pass took {} s on both channels.'.format(str(start1 - end1)))
+            self.sig = 'i1'
+            uf.AddInfoAfterRecursive(self)
+            end2 = timer()
+            print('Adding Info took {} s on both channels.'.format(str(end2 - end1)))
+            self.NumberOfEvents=len(np.uint64(self.AnalysisResults['i1']['RoughEventLocations'][:, 0]))
+            uf.SaveToHDF5(self)
+            end3 = timer()
+            print('Saving took {} s on both channels.'.format(str(end3 - end2)))
 
     def inspectevent(self, clicked = []):
-        if self.ui.actionPlot_Common_Events.isChecked():
-            uf.PlotEventDoubleFit(self, clicked)
-        elif self.ui.actionPlot_i1_detected_only.isChecked() or self.ui.actionPlot_i2_detected_only.isChecked():
-            uf.PlotEventDouble(self)
+        if self.out['graphene']:
+            if self.ui.actionPlot_Common_Events.isChecked():
+                uf.PlotEventDoubleFit(self, clicked)
+            elif self.ui.actionPlot_i1_detected_only.isChecked() or self.ui.actionPlot_i2_detected_only.isChecked():
+                uf.PlotEventDouble(self)
+        else:
+            uf.PlotEventSingle(self, clicked)
 
     def nextevent(self):
         eventnumber=np.int(self.ui.eventnumberentry.text())
-
-        if eventnumber>=self.NumberOfEvents:
+        print(self.NumberOfEvents)
+        if eventnumber>=self.NumberOfEvents-1:
             eventnumber=0
         else:
             eventnumber=np.int(self.ui.eventnumberentry.text())+1
@@ -447,7 +465,12 @@ class GUIForm(QtGui.QMainWindow):
         self.inspectevent()
 
     def previousevent(self):
-        eventnumber=np.int(self.ui.eventnumberentry.text())-1
+        eventnumber=np.int(self.ui.eventnumberentry.text())
+        print(self.NumberOfEvents)
+        if eventnumber<=0:
+            eventnumber=self.NumberOfEvents-1
+        else:
+            eventnumber=np.int(self.ui.eventnumberentry.text())-1
         self.ui.eventnumberentry.setText(str(eventnumber))
         self.inspectevent()
 

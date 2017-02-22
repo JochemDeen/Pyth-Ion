@@ -782,7 +782,6 @@ def AddInfoAfterRecursive(self):
 
     CusumBaseline=500
     numberofevents = len(startpoints)
-
     self.AnalysisResults[self.sig]['StartPoints'] = startpoints
     self.AnalysisResults[self.sig]['EndPoints'] = endpoints
     self.AnalysisResults[self.sig]['LocalBaseline'] = localBaseline
@@ -922,17 +921,7 @@ def save(self):
 
 def PlotEventSingle(self, clicked=[]):
     f = h5py.File(self.matfilename + '_OriginalDB.hdf5', "r")
-    if self.ui.actionPlot_i1_detected_only.isChecked():
-        sig = 'i1'
-        sig2 = 'i2'
-    if self.ui.actionPlot_i2_detected_only.isChecked():
-        sig = 'i2'
-        sig2 = 'i1'
-
-        i1_indexes = f['LowPassSegmentation/i1/CommonIndex']
-        i2_indexes = f['LowPassSegmentation/i2/CommonIndex']
-        i1 = f['LowPassSegmentation/i1/']
-        i2 = f['LowPassSegmentation/i2/']
+    sig='i1'
 
     startpoints=self.AnalysisResults[sig]['StartPoints']
     endpoints=self.AnalysisResults[sig]['EndPoints']
@@ -953,15 +942,10 @@ def PlotEventSingle(self, clicked=[]):
     # plot event fit
     self.p3.plot(self.t[startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer], np.concatenate((
         np.repeat(np.array([localBaseline[eventnumber]]), eventbuffer),
-        np.repeat(np.array([localBaseline[eventnumber] - self.deli[eventnumber
+        np.repeat(np.array([localBaseline[eventnumber] - self.AnalysisResults['i1']['DeltaI'][eventnumber
         ]]), endpoints[eventnumber] - startpoints[eventnumber]),
         np.repeat(np.array([localBaseline[eventnumber]]), eventbuffer)), 0),
                  pen=pg.mkPen(color=(173, 27, 183), width=3))
-
-    # plot 2nd Channel
-    self.p3.plot(self.t[startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
-                 self.out[sig2][startpoints[eventnumber] - eventbuffer:endpoints[eventnumber] + eventbuffer],
-                 pen='r')
 
     self.p3.autoRange()
 
