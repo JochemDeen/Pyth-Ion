@@ -32,8 +32,8 @@ def Reshape1DTo2D(inputarray, buffersize):
             voltages = np.append(voltages, inputarray[(i-1)*buffersize:i*buffersize-1], axis=0)
             #print('Length Voltages: {}'.format(len(voltages)))
 
-    v1 = np.ones((1, len(voltages)), dtype=np.float64)
-    i1 = np.ones((1, len(currents)), dtype=np.float64)
+    v1 = np.ones((len(voltages)), dtype=np.float64)
+    i1 = np.ones((len(currents)), dtype=np.float64)
     v1[:]=voltages
     i1[:]=currents
 
@@ -92,17 +92,17 @@ def ImportChimeraRaw(datafilename):
     data = -ADCvref + (2 * ADCvref) * (data & bitmask) / 2 ** 16
     data = (data / closedloop_gain + currentoffset)
     data.shape = [data.shape[1], ]
-    output = {'matfilename': str(os.path.splitext(datafilename)[0]),'current': data, 'voltage': np.float64(matfile['SETUP_mVoffset']), 'samplerate': samplerate, 'type': 'ChimeraRaw', 'filename': datafilename}
+    output = {'matfilename': str(os.path.splitext(datafilename)[0]),'i1raw': data, 'v1': np.float64(matfile['SETUP_mVoffset']), 'samplerate': np.int64(samplerate), 'type': 'ChimeraRaw', 'filename': datafilename}
     return output
 
 def ImportChimeraData(datafilename):
-    matfile=io.loadmat(str(os.path.splitext(datafilename)[0]))
-    samplerate=matfile['ADCSAMPLERATE']
+    matfile = io.loadmat(str(os.path.splitext(datafilename)[0]))
+    samplerate = matfile['ADCSAMPLERATE']
     if samplerate<4e6:
-        data=np.fromfile(datafilename, np.dtype('float64'))
-        buffersize=matfile['DisplayBuffer']
-        out=Reshape1DTo2D(data, buffersize)
-        output={'current': out['i1'], 'voltage': out['v1'], 'samplerate':samplerate, 'type': 'ChimeraNotRaw', 'filename': datafilename}
+        data = np.fromfile(datafilename, np.dtype('float64'))
+        buffersize = matfile['DisplayBuffer']
+        out = Reshape1DTo2D(data, buffersize)
+        output = {'i1': out['i1'], 'v1': out['v1'], 'samplerate':float(samplerate), 'type': 'ChimeraNotRaw', 'filename': datafilename}
     else:
         output = ImportChimeraRaw(datafilename)
     return output
@@ -191,8 +191,8 @@ def PlotData(output):
             return fig_handles
 
     if output['type'] == 'ChimeraRaw':
-        time=np.float32(np.arange(0, len(output['current']))/output['samplerate'])
-        figure=plt.figure('Chimera Raw Current @ {} mV'.format(output['voltage']*1e3))
+        time = np.float32(np.arange(0, len(output['current']))/output['samplerate'])
+        figure = plt.figure('Chimera Raw Current @ {} mV'.format(output['voltage']*1e3))
         plt.plot(time, output['current']*1e9)
         plt.ylabel('Current [nA]')
         plt.xlabel('Time [s]')
@@ -201,7 +201,7 @@ def PlotData(output):
         return fig_handles
 
     if output['type'] == 'ChimeraNotRaw':
-        time=np.float32(np.arange(0, len(output['current']))/output['samplerate'])
+        time = np.float32(np.arange(0, len(output['current']))/output['samplerate'])
         figure2 = plt.figure('Chimera Not Raw (Display Save Mode)')
         ax3 = plt.subplot(211)
         ax3.plot(time, output['current'] * 1e9)
@@ -217,8 +217,8 @@ def PlotData(output):
 
 def CutDataIntoVoltageSegments(output, delay=0.7, plotSegments = 1, x='i1', y='v1', extractedSegments = ''):
     if output['type'] == 'ChimeraNotRaw':
-        current = output['current']
-        voltage = output['voltage']
+        current = output['i1']
+        voltage = output['v1']
         samplerate = output['samplerate']
     elif output['type'] == 'Axopatch' and x == 'i1' and y == 'v1':
         current = output['i1']
@@ -587,14 +587,14 @@ def PlotSingle(self):
         self.p1.setLabel('left', text='Transverse Current', units='A')
         self.voltagepl.setLabel('left', text='Transverse Voltage', units='V')
     else:
-        temp_i = self.out['i1']
+        temp_i = np.array(self.out['i1'])
         temp_v = self.out['v1']
         self.p1.setLabel('left', text='Ionic Current', units='A')
         self.voltagepl.setLabel('left', text='Ionic Voltage', units='V')
 
     self.p1.setLabel('bottom', text='Time', units='s')
+    print('self.t:' + str(self.t.shape) + ', temp_i:'+str(temp_i.shape))
     self.voltagepl.setLabel('bottom', text='Time', units='s')
-
     self.p1.plot(self.t, temp_i, pen='b')
     aphy, aphx = np.histogram(temp_i, bins=np.round(len(temp_i) / 1000))
     aphx = aphx
@@ -603,10 +603,12 @@ def PlotSingle(self):
     self.p3.addItem(aphhist)
 
     if self.out['type'] == 'ChimeraRaw':
-        self.voltagepl.addLine(y=self.out['voltage'], pen='b')
-    self.voltagepl.plot(self.t, temp_v, pen='b')
+        self.voltagepl.addLine(y=self.out['v1'], pen='b')
+    else:
+        self.voltagepl.plot(self.t, temp_v, pen='b')
 
     self.psdplot.clear()
+    print('Samplerate: ' + str(self.out['samplerate']))
     MakePSD(temp_i, self.out['samplerate'], self.psdplot)
     siSamplerate = pg.siScale(self.out['samplerate'])
     siSTD = pg.siScale(np.std(temp_i))

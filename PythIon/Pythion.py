@@ -70,6 +70,8 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.actionPlot_i2_detected_only.triggered.connect(self.EventFiltering)
         self.ui.actionPlot_i1_detected_only.triggered.connect(self.EventFiltering)
 
+        self.ui.LPentry.editingFinished.connect(self.Load)
+
         self.ui.actionUse_Clipping.setChecked(False)
         #        self.ui.actionBatch_Process.triggered.connect(self.batchinfodialog)
         self.ui.plotBoth.clicked.connect(self.Plot)
@@ -252,15 +254,19 @@ class GUIForm(QtGui.QMainWindow):
             self.out = uf.ImportChimeraData(self.datafilename)
             self.matfilename = str(os.path.splitext(self.datafilename)[0])
             if self.out['type'] == 'ChimeraNotRaw':
-                self.data = self.out['current']
+                self.data = self.out['i1']
                 print(str(self.data.shape))
-                self.vdata = self.out['voltage']
+                self.vdata = self.out['v1']
             else:
+                s=timer()
                 Wn = round(self.LPfiltercutoff/(self.out['samplerate']/2), 4)
-                b,a = signal.bessel(4, Wn, btype='low');
-                self.out['lowpassedData'] = signal.filtfilt(b,a,self.out['current'])
-                self.data = self.out['lowpassedData']
-                self.vdata = np.ones(len(self.data)) * self.out['voltage']
+                b, a = signal.bessel(4, Wn, btype='low')
+                temp = signal.filtfilt(b, a, self.out['i1raw'])
+                self.out['i1'] = scipy.signal.decimate(temp, int(self.out['samplerate']/(self.LPfiltercutoff*5)))
+                self.data = self.out['i1']
+                self.vdata = np.ones(len(self.data)) * self.out['v1']
+                e=timer()
+                print('Chimera Loading:' + str(e-s))
 
         if str(os.path.splitext(self.datafilename)[1])=='.opt':
             self.data = np.fromfile(self.datafilename, dtype = np.dtype('>d'))
@@ -347,8 +353,10 @@ class GUIForm(QtGui.QMainWindow):
                     self.p1.addItem(cmdtext)
                     cmdtext.setPos(cmdt,np.max(self.data))
 
-        self.t=np.arange(0, len(self.out['i1']))
-        self.t=self.t/self.out['samplerate']
+        self.t = np.arange(len(self.out['i1']))
+        self.t = self.t/self.out['samplerate']
+       # if str(os.path.splitext(self.datafilename)[1])=='.log':
+        #    self.t.shape = [self.t.shape[1],]
 
         self.ui.label_2.setText('Output Samplerate ' + str(pg.siScale(np.float(self.outputsamplerate))[1]))
 
