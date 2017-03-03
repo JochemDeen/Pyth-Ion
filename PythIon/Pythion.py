@@ -257,12 +257,23 @@ class GUIForm(QtGui.QMainWindow):
                 self.data = self.out['i1']
                 print(str(self.data.shape))
                 self.vdata = self.out['v1']
+                self.ui.outputsamplerateentry.setText(str(self.out['samplerate']/1000))
             else:
                 s=timer()
-                Wn = round(self.LPfiltercutoff/(self.out['samplerate']/2), 4)
-                b, a = signal.bessel(4, Wn, btype='low')
-                temp = signal.filtfilt(b, a, self.out['i1raw'])
-                self.out['i1'] = scipy.signal.decimate(temp, int(self.out['samplerate']/(self.LPfiltercutoff*5)))
+                ds_factor = int(self.out['samplerate']/(self.LPfiltercutoff*5))
+                if ds_factor>1:
+                    ds_sig = scipy.signal.resample(self.out['i1raw'], len(self.out['i1raw'])/ds_factor)
+                    Wn = round(2*self.LPfiltercutoff/(self.out['samplerate']/ds_factor), 4)  # [0,1] nyquist frequency
+                    b, a = signal.bessel(4, Wn, btype='low', analog=False)
+                    self.out['i1'] = signal.filtfilt(b, a, ds_sig)
+                    self.ui.outputsamplerateentry.setText(str(self.out['samplerate'] / ds_factor / 1000))
+                else:
+                    Wn = round(2*self.LPfiltercutoff/(self.out['samplerate']), 4)  # [0,1] nyquist frequency
+                    b, a = signal.bessel(4, Wn, btype='low', analog=False)
+                    self.out['i1'] = signal.filtfilt(b, a, self.out['i1raw'])
+                    self.p1.setDownsampling(ds=True, auto=True, mode='subsample')
+                    self.p1.setClipToView(True)
+
                 self.data = self.out['i1']
                 self.vdata = np.ones(len(self.data)) * self.out['v1']
                 e=timer()
@@ -358,7 +369,7 @@ class GUIForm(QtGui.QMainWindow):
        # if str(os.path.splitext(self.datafilename)[1])=='.log':
         #    self.t.shape = [self.t.shape[1],]
 
-        self.ui.label_2.setText('Output Samplerate ' + str(pg.siScale(np.float(self.outputsamplerate))[1]))
+        #self.ui.label_2.setText('Output Samplerate ' + str(pg.siScale(np.float(self.outputsamplerate))[1]))
 
         if loadandplot == True:
             self.Plot()
