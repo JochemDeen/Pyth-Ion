@@ -20,7 +20,6 @@ from PoreSizer import *
 from batchinfo import *
 import UsefulFunctions as uf
 import scipy
-import matplotlib
 from matplotlib.backends.backend_pdf import PdfPages
 import time
 import h5py
@@ -97,14 +96,14 @@ class GUIForm(QtGui.QMainWindow):
 
         self.p1.enableAutoRange(axis='y')
         self.p1.disableAutoRange(axis='x')
-        self.p1.setDownsampling(ds=False, auto=True, mode='subsample')
-        self.p1.setClipToView(False)
+        self.p1.setDownsampling(ds=True, auto=True, mode='subsample')
+        self.p1.setClipToView(True)
 
         self.voltagepl = self.ui.voltageplotwin
         self.voltagepl.enableAutoRange(axis='y')
         self.voltagepl.disableAutoRange(axis='x')
         self.voltagepl.setDownsampling(ds=True, auto=True, mode='subsample')
-        self.voltagepl.setClipToView(False)
+        self.voltagepl.setClipToView(True)
         self.voltagepl.setXLink(self.p1)
 
         self.ivplota = self.ui.ivplot
@@ -184,6 +183,8 @@ class GUIForm(QtGui.QMainWindow):
         self.ui.LP_S_2.setOpts(value=5, suffix='x STD', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
         self.ui.LP_E_2.setOpts(value=0, suffix='x STD', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
         self.ui.LP_eventlengthThresh_2.setOpts(value=1e-3, suffix='s', siPrefix=True, dec=True, step=10e-3, minStep=10e-3)
+
+        self.Derivative = 'i2'
 
         ####### Initializing various variables used for analysis##############
         self.NumberOfEvents=0
@@ -810,6 +811,8 @@ class GUIForm(QtGui.QMainWindow):
             self.deleteevent()
         if key == QtCore.Qt.Key_S:
             self.skeypressed()
+        if key == QtCore.Qt.Key_D:
+            self.dkeypresses()
 
     def saveeventfits(self):
         eventbuffer=np.int(self.ui.eventbufferentry.value())
@@ -1058,6 +1061,17 @@ class GUIForm(QtGui.QMainWindow):
         else:
             self.p1.setDownsampling(ds=False, auto=True, mode='subsample')
             self.Plot()
+
+    def dkeypresses(self):
+        if self.ui.eventplot.underMouse():
+            # PDF to save images:
+            filename = os.path.splitext(os.path.basename(self.datafilename))[0]
+            dirname = os.path.dirname(self.datafilename)
+            self.count = 1
+            while os.path.isfile(dirname + os.sep + filename + '_AllSavedImages_' + str(self.count) + '.pdf'):
+                self.count += 1
+            self.pp = PdfPages(dirname + os.sep + filename + '_AllSavedImages_' + str(self.count) + '.pdf')
+            uf.SaveDerivatives(self)
 
     def skeypressed(self):
         if self.ui.ivplot.underMouse():

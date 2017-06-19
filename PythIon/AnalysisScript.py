@@ -1,6 +1,8 @@
 import numpy as np
-import pyqtgraph as pg
+#import pyqtgraph as pg
 import UsefulFunctions as uf
+import matplotlib
+matplotlib.use('TkAgg')
 from matplotlib.ticker import NullFormatter
 from matplotlib import pyplot as plt
 import h5py
@@ -8,8 +10,8 @@ import os
 
 expname = '10mMCis100mMTrans80mer_BigFileOnly'
 
-file = '/Users/migraf/Desktop/Temp/Axo Data/17B_10mMCis100mMtransKCl_80mer_2.dat'
-datafile = '/Users/migraf/Desktop/Temp/Axo Data/17B_10mMCis100mMtransKCl_80mer_2_OriginalDB.hdf5'
+file = '/Volumes/backup/2016/Michael/Axopatch/21112016/17B_10mMCis100mMtransKCl_80mer_2.dat'
+datafile = '/Volumes/backup/2016/Michael/Axopatch/21112016/17B_10mMCis100mMtransKCl_80mer_2_OriginalDB.hdf5'
 
 directory = (str(os.path.split(datafile)[0]) + os.sep + expname + '_SavedImages')
 

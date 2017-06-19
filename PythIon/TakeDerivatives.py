@@ -22,7 +22,7 @@ partinsamples=np.int64(np.round(out['samplerate']*PartToConsider))
 
 i1part=out['i1'][partinsamples[0]:partinsamples[1]]
 i2part=out['i2'][partinsamples[0]:partinsamples[1]]
-t=self.t[pardtinsamples[0]:partinsamples[1]]
+t=self.t[partinsamples[0]:partinsamples[1]]
 
 plt.figure(1)
 plt.subplot(2, 1, 1)
