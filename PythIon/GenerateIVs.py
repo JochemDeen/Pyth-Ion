@@ -14,11 +14,12 @@ fontP.set_size('small')
 Tk().withdraw()
 os.system('''/usr/bin/osascript -e 'tell app "Finder" to set frontmost of process "python" to true' ''')
 
-filenames = ['/Volumes/backup/2017/Michael/Axopatch/20170512/10mMKClInFlowCellORingPore1mm.dat']
+#filenames = ['/Volumes/backup/2017/Michael/Axopatch/20170512/10mMKClInFlowCellORingPore1mm.dat']
 #filenames = ['/Volumes/backup/2017/Michael/Axopatch/20170512/bmimpf6lInFlowCellORingPore1mm.dat']
 expname = 'ExpFitTests'
+bothChannels=0
 
-#filenames = askopenfilenames() # show an "Open" dialog box and return the path to the selected file
+filenames = askopenfilenames() # show an "Open" dialog box and return the path to the selected file
 for filename in filenames:
     print(filename)
     #Make Dir to save images
@@ -40,16 +41,16 @@ for filename in filenames:
     #figExtracteParts.savefig(directory + os.sep + 'PlotExtracted_' + str(os.path.split(filename)[1])[:-4] + '.eps')
     #figExtracteParts.savefig(directory + os.sep + 'PlotExtracted_' + str(os.path.split(filename)[1])[:-4] + '.png', dpi=150)
 
-
     # Plot IV
     figIV = plt.figure(2)
     ax1IV = figIV.add_subplot(111)
-    figIV2 = plt.figure(3)
-    ax2IV = figIV2.add_subplot(111)
     ax1IV = uf.PlotIV(output, AllData, current = 'i1', unit=1e9, axis = ax1IV, WithFit = 1)
-    ax2IV = uf.PlotIV(output, AllData, current = 'i2', unit=1e9, axis = ax2IV, WithFit = 1)
     figIV.tight_layout()
-    figIV2.tight_layout()
+    if bothChannels:
+        figIV2 = plt.figure(3)
+        ax2IV = figIV2.add_subplot(111)
+        ax2IV = uf.PlotIV(output, AllData, current = 'i2', unit=1e9, axis = ax2IV, WithFit = 1)
+        figIV2.tight_layout()
 
 
 #legend Format

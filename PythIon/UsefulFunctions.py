@@ -267,7 +267,7 @@ def MakeIVData(output, approach = 'mean', delay = 0.7):
         # First item
         Item['Voltage'][0] = Values[0]
         trace = output[current][0 + delayinpoints:ChangePoints[0]]
-        trace = trace[1-np.isnan(trace)]
+        #trace = trace[1-np.isnan(trace)]
         Item['StartPoint'][0] = 0 + delayinpoints
         Item['EndPoint'][0] = ChangePoints[0]
         Item['Mean'][0] = np.mean(trace)
@@ -328,15 +328,19 @@ def MakeIVData(output, approach = 'mean', delay = 0.7):
         All['Currents'] = currents
     return All
 
-def PlotIV(output, AllData, current = 'i1', unit=1e9, axis = '', WithFit = 1):
+def PlotIV(output, AllData, current = 'i1', unit=1e9, axis = '', WithFit = 1, PoreSize = [0,0]):
     axis.errorbar(AllData[current]['Voltage'], AllData[current]['Mean']*unit, yerr=AllData[current]['STD']*unit, fmt='o', label=str(os.path.split(output['filename'])[1])[:-4])
     axis.set_ylabel('Current ' + current + ' [nA]')
     axis.set_xlabel('Voltage ' + AllData[current]['SweepedChannel'] +' [V]')
     if WithFit:
-        axis.set_title('IV Plot with Fit: G={:.2f}nS'.format(AllData[current]['YorkFitValues']['Slope']*unit))
+        axis.set_title('IV Plot with Fit: G={:.2f}nS, R={:.2f}GOhm'.format(AllData[current]['YorkFitValues']['Slope']*unit, 1/(AllData[current]['YorkFitValues']['Slope']*unit)))
         axis.plot(AllData[current]['YorkFitValues']['x_fit'], AllData[current]['YorkFitValues']['y_fit']*unit, 'r--', label='Linear Fit')
     else:
         axis.set_title('IV Plot')
+    if PoreSize[0]:
+        textstr = 'Pore Size\nConductance: {}S/m\nLenght: {}m:\ndiameter: {}m'.format(pg.siFormat(PoreSize[0]), pg.siFormat(PoreSize[1]), pg.siFormat(CalculatePoreSize(AllData[current]['YorkFitValues']['Slope'], PoreSize[1], PoreSize[0])))
+        axis.text(0.05, 0.95, textstr, transform=axis.transAxes, fontsize=12,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
     return axis
 
 def ExpFunc(x, a, b, c):
@@ -422,8 +426,8 @@ def YorkFit(X, Y, sigma_X, sigma_Y, r=0):
     b_lse = np.array(tmp)[0][0]
     #a_lse=tmp(2);
     b = b_lse #initial guess
-    omega_X = np.true_divide(1,np.power(sigma_X,2))
-    omega_Y = np.true_divide(1, np.power(sigma_Y,2))
+    omega_X = np.true_divide(1, np.power(sigma_X, 2))
+    omega_Y = np.true_divide(1, np.power(sigma_Y, 2))
     alpha=np.sqrt(omega_X*omega_Y)
     b_save = np.zeros(N_itermax+1) #vector to save b iterations in
     b_save[0]=b
@@ -644,7 +648,7 @@ def PlotSingle(self):
     print('self.t:' + str(self.t.shape) + ', temp_i:'+str(temp_i.shape))
     self.voltagepl.setLabel('bottom', text='Time', units='s')
     self.p1.plot(self.t, temp_i, pen='b')
-    aphy, aphx = np.histogram(temp_i, bins=np.round(len(temp_i) / 1000))
+    aphy, aphx = np.histogram(temp_i, bins=np.int64(np.round(len(temp_i) / 1000)))
     aphx = aphx
 
     aphhist = pg.PlotCurveItem(aphx, aphy, stepMode=True, fillLevel=0, brush='b')

@@ -25,7 +25,10 @@ figIV = plt.figure(2)
 ax1IV = figIV.add_subplot(111)
 ax1IV = uf.PlotIV(output, AllData, current='i1', unit=1e9, axis=ax1IV, WithFit=0)
 figIV.tight_layout()
+
 # Save Figures
 #figIV.savefig(directory + os.sep + str(os.path.split(filename)[1]) + 'IV_i1.png', dpi=150)
 #figIV.savefig(directory + os.sep + str(os.path.split(filename)[1]) + 'IV_i1.eps')
+
 figIV.show()
+plt.show()
